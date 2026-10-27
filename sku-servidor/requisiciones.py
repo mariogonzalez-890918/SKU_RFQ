@@ -251,7 +251,11 @@ class RequisitionStore:
   if not document or not own or document['sucursal'] not in visible_branches(actor):return None
   return requester_document(document) if actor and actor['role']=='requisicion' else document
 def document_csv(doc):return csv_bytes([['FOLIO','FECHA SERVIDOR','SUCURSAL','AREA','SOLICITANTE','SKU','ID MATERIAL','DESCRIPCION','CANTIDAD','UNIDAD','OBSERVACIONES','ESTADO','REVISION','MOTIVO CANCELACION'],*[ [doc['numero'],doc['fechaHora'],doc['sucursal'],doc['area'],doc['solicitante'],r['sku'],r['materialId'],r['nombre'],r['cantidad'],r['unidad'],r['observaciones'],doc['estado'],doc.get('revision',1),doc.get('cancelacion',{}).get('motivo','')] for r in doc['partidas']]])
-def print_document(doc):
+def print_document(doc,formato='actual'):
+ if formato=='ticket':
+  from ticket import print_ticket
+  return print_ticket(doc)
+ if formato!='actual':raise ValueError('Selecciona formato actual o ticket Bixolon.')
  from app_info import TITLE,VERSION,SUPPORT_LINE
  raw=_print_document_body(doc).decode('utf8');banner='<div style="font:11px Arial;margin-bottom:18px"><strong>'+html.escape(TITLE+' v'+VERSION)+'</strong><br>'+html.escape(SUPPORT_LINE)+'</div>'
  return raw.replace('<header>',banner+'<header>',1).encode('utf8')

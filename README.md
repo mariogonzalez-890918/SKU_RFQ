@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.5.0
+# RFQ_SKU_GMP · Versión 1.6.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -21,6 +21,8 @@ El perfil **Requisición** permite crear solicitudes y consultar exclusivamente 
 Las contraseñas nuevas requieren de 4 a 200 caracteres. En el acceso y en Usuarios está la casilla **Mostrar contraseña** para revisarla antes de enviar el formulario.
 
 En Requisiciones → **Áreas solicitantes**, Superadministrador, AUXTI y Gerente pueden agregar y editar áreas. Los nombres anteriores se conservan para las requisiciones emitidas, correcciones y filtros de reportes. El catálogo se incluye en el respaldo de requisiciones.
+
+Cada requisición ofrece dos opciones de impresión: el formato actual y **Ticket Bixolon 80 mm**, con contenido de 72 mm y firmas de Solicita, Entrega y Recibe al final. El ticket no muestra costos ni fotos de productos. En la vista previa pulsa Imprimir / Guardar PDF y selecciona la BIXOLON (por ejemplo, `bixo`), rollo de 80 mm, escala 100 %, sin márgenes ni encabezados/pies del navegador. La impresión conserva los mismos permisos de acceso de la requisición.
 
 ## Descargar EXE
 

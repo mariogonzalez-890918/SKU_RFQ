@@ -46,6 +46,7 @@
 !/tests/test_auxti.py
 !/tests/test_request_role.py
 !/tests/test_password_areas.py
+!/tests/test_ticket.py
 !/tests/mobile_menu_regression.mjs
 **/__pycache__/
 *.pyc

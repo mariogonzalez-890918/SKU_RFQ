@@ -294,7 +294,7 @@ def create_handler(store):
      if match:
       document=requisitions.get(match[1],actor)
       if document is None:return self.reply(404,{'error':'Solicitud no encontrada.'})
-      if match[2]=='imprimir':return self.reply(200,print_document(document),'text/html; charset=utf-8')
+      if match[2]=='imprimir':return self.reply(200,print_document(document,query.get('formato',['actual'])[0]),'text/html; charset=utf-8')
       if match[2]=='csv':return self.reply(200,document_csv(document),'text/csv; charset=utf-8')
       return self.reply(200,document)
      return self.reply(404,{'error':'No encontrado.'})
