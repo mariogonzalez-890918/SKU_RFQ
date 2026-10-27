@@ -6,12 +6,12 @@ MX=datetime.timezone(datetime.timedelta(hours=-6))
 AREAS=['Produccion','Produccion Barra congelada','Produccion Batidos Galletas','Produccion Bizcochero','Produccion Donas','Produccion Franceseros','Produccion Gelatinas','Produccion Limpieza','Produccion Pasteleros','Produccion Punto de Venta San Pablo','Produccion Reposteria','Produccion Rosticeria','Salida Cuautitlan','Salida Ejidos','Almacen rosticeria','Produccion Pan Molido','Produccion Pesadas','Produccion Condimix','Produccion Empacado','Produccion Empacado Armado','Produccion Empacado Congelado','Expendio']
 BRANCHES={'EJIDOS':'REQ-EJI','SAN PABLO':'REQ-SP','CUAUTITLAN':'REQ-CUA','EJE 8':'REQ-E8'}
 MANAGERS={'superadmin','auxti','compras','alta'}
-SCOPED_ROLES={'gerente','almacenista'}
-READ_ONLY_ROLES={'visualizador','gerente','almacenista'}
+SCOPED_ROLES={'gerente','almacenista','requisicion'}
+READ_ONLY_ROLES={'visualizador','almacenista'}
 NS={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 def visible_branches(actor=None):
  if actor is None or actor['role'] not in SCOPED_ROLES:return list(BRANCHES)
- field='sucursales' if actor['role']=='gerente' else 'almacenes'
+ field='sucursales' if actor['role'] in ('gerente','requisicion') else 'almacenes'
  return [value for value in actor.get(field,[]) if value in BRANCHES]
 def now():return datetime.datetime.now(datetime.timezone.utc).astimezone(MX).isoformat(timespec='seconds')
 def norm(value):return ' '.join(re.sub('[^A-Z0-9 ]',' ',''.join(c for c in unicodedata.normalize('NFD',str(value or '')) if not unicodedata.combining(c)).upper()).split())
@@ -73,6 +73,15 @@ def parse_master(raw,filename):
  if len(materials)>20000:raise ValueError('Se admiten hasta 20,000 artículos por carga.')
  counts=collections.Counter(r['sku'] for r in materials if r['sku'])
  return {'materiales':materials,'hoja':sheet,'archivo':filename,'total':len(materials),'sinSku':sum(not r['sku'] for r in materials),'sinUnidad':sum(not r['unidad'] for r in materials),'skuRepetidos':sum(v>1 for v in counts.values()),'inactivos':sum(r['estado']=='INACTIVO' for r in materials)}
+def requester_document(document):
+ """Campos operativos autorizados; excluye cualquier costo agregado por datos históricos."""
+ if document is None:return None
+ keys=('id','numero','serie','folio','fecha','fechaHora','sucursal','area','solicitante','observaciones','creadoPor','nombreUsuario','estado','revision')
+ result={key:document[key] for key in keys if key in document}
+ result['partidas']=[{key:line[key] for key in ('materialId','sku','nombre','cantidad','unidad','proveedor','observaciones') if key in line} for line in document.get('partidas',[])]
+ if isinstance(document.get('cancelacion'),dict):result['cancelacion']={key:document['cancelacion'][key] for key in ('motivo','fecha','autorizadoPor') if key in document['cancelacion']}
+ return result
+
 class Conflict(ValueError):pass
 class RequisitionStore:
  def __init__(self,store):
@@ -85,6 +94,7 @@ class RequisitionStore:
    db.execute('CREATE TABLE IF NOT EXISTS req_documents(id TEXT PRIMARY KEY,creator TEXT NOT NULL,client_key TEXT NOT NULL,fingerprint TEXT NOT NULL,branch TEXT NOT NULL,series TEXT NOT NULL,folio INTEGER NOT NULL,number TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(creator,client_key))')
    db.execute('CREATE INDEX IF NOT EXISTS req_documents_branch_date ON req_documents(branch,created_at)')
    db.execute('CREATE INDEX IF NOT EXISTS req_documents_date ON req_documents(created_at)')
+   db.execute('CREATE INDEX IF NOT EXISTS req_documents_creator_date ON req_documents(creator,created_at)')
    for branch,series in BRANCHES.items():
     db.execute('INSERT OR IGNORE INTO req_branches VALUES(?,?,1,1)',(branch,series));db.execute('INSERT OR IGNORE INTO req_series_registry VALUES(?,?)',(series,branch))
    if not db.execute('SELECT 1 FROM req_masters').fetchone():
@@ -115,8 +125,12 @@ class RequisitionStore:
    branches=[dict(zip(('sucursal','serie','siguiente','revision'),r)) for r in db.execute('SELECT branch,series,next_folio,revision FROM req_branches ORDER BY rowid')]
    branches=[b for b in branches if b['sucursal'] in visible]
    for b in branches:b['vistaPrevia']=b['serie']+'-'+str(b['siguiente']).zfill(6)
-   master=db.execute('SELECT filename,created_at,report FROM req_masters ORDER BY id DESC LIMIT 1').fetchone();count=db.execute('SELECT COUNT(*) FROM req_documents WHERE branch IN ('+','.join('?' for _ in visible)+')',visible).fetchone()[0]
-  return {'areas':AREAS,'sucursales':branches,'fechaServidor':now(),'zonaHoraria':'Ciudad de México (UTC-06:00)','maestro':{'archivo':master[0],'cargado':master[1],**json.loads(master[2])},'totalSolicitudes':count}
+   master=db.execute('SELECT filename,created_at,report FROM req_masters ORDER BY id DESC LIMIT 1').fetchone();where=' WHERE branch IN ('+','.join('?' for _ in visible)+')';params=list(visible)
+   if actor and actor['role']=='requisicion':where+=' AND creator=?';params.append(actor['email'])
+   count=db.execute('SELECT COUNT(*) FROM req_documents'+where,params).fetchone()[0]
+  master_report=json.loads(master[2])
+  if actor and actor['role']=='requisicion':master_report={key:master_report[key] for key in ('hoja','total') if key in master_report}
+  return {'areas':AREAS,'sucursales':branches,'fechaServidor':now(),'zonaHoraria':'Ciudad de México (UTC-06:00)','maestro':{'archivo':master[0],'cargado':master[1],**master_report},'totalSolicitudes':count}
  def materials(self):
   with self.store.connect() as db:rows=db.execute('SELECT id,payload FROM req_materials ORDER BY id').fetchall()
   result=[{'id':id,**json.loads(payload)} for id,payload in rows];counts=collections.Counter(r['sku'] for r in result if r['sku'])
@@ -163,9 +177,10 @@ class RequisitionStore:
   with self.store.connect() as db:name,content=db.execute('SELECT filename,content FROM req_masters ORDER BY id DESC LIMIT 1').fetchone()
   return name,base64.b64decode(content)
  def configure(self,data,actor):
-  if actor['role'] not in ('superadmin','auxti'):raise PermissionError('Solo administración puede configurar series y folios.')
+  if actor['role'] not in ('superadmin','auxti','gerente'):raise PermissionError('Solo administración y Gerente pueden configurar series y folios.')
   branch=data.get('sucursal');series=text(data.get('serie',''),20).upper();number=data.get('siguiente');revision=data.get('revision')
   if branch not in BRANCHES or not re.fullmatch('[A-Z0-9][A-Z0-9-]{1,19}',series) or type(number) is not int or not 1<=number<=999999999 or type(revision) is not int:raise ValueError('Sucursal, serie o siguiente folio inválidos.')
+  if branch not in visible_branches(actor):raise PermissionError('No tienes acceso a esta sucursal.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');old=db.execute('SELECT next_folio,revision FROM req_branches WHERE branch=?',(branch,)).fetchone()
    if old[1]!=revision:raise Conflict('La serie cambió o se emitió una solicitud. Actualiza antes de guardar.')
@@ -173,13 +188,14 @@ class RequisitionStore:
    owner=db.execute('SELECT branch FROM req_series_registry WHERE series=?',(series,)).fetchone()
    if owner and owner[0]!=branch:raise ValueError('Esa serie pertenece a otra sucursal y está reservada.')
    db.execute('INSERT OR IGNORE INTO req_series_registry VALUES(?,?)',(series,branch));db.execute('UPDATE req_branches SET series=?,next_folio=?,revision=revision+1 WHERE branch=?',(series,number,branch))
-  return self.metadata()
+  return self.metadata(actor)
  def create(self,data,actor):
   if actor['role'] in READ_ONLY_ROLES:raise PermissionError('Tu perfil solo permite consultar solicitudes.')
   allowed={'sucursal','area','solicitante','observaciones','partidas','claveCliente'}
   if set(data)-allowed:raise ValueError('Fecha, serie y folio son asignados por el servidor y no se pueden modificar.')
   branch=data.get('sucursal');area=data.get('area');requester=text(data.get('solicitante',''),160);notes=text(data.get('observaciones',''),2000);key=text(data.get('claveCliente',''),100);lines=data.get('partidas')
   if branch not in BRANCHES or area not in AREAS or not requester or not re.fullmatch('[A-Za-z0-9_-]{16,100}',key) or not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Selecciona sucursal, área, solicitante y entre 1 y 200 partidas.')
+  if branch not in visible_branches(actor):raise PermissionError('No tienes acceso para solicitar materiales en esta sucursal.')
   canonical={'sucursal':branch,'area':area,'solicitante':requester,'observaciones':notes,'partidas':[]};seen=set()
   for line in lines:
    if not isinstance(line,dict) or set(line)-{'materialId','cantidad','observaciones'}:raise ValueError('Partida inválida; SKU y unidad provienen del maestro.')
@@ -194,7 +210,7 @@ class RequisitionStore:
    db.execute('BEGIN IMMEDIATE');existing=db.execute('SELECT fingerprint,payload FROM req_documents WHERE creator=? AND client_key=?',(actor['email'],key)).fetchone()
    if existing:
     if existing[0]!=fingerprint:raise Conflict('La clave de envío ya corresponde a otra solicitud. Inicia una solicitud nueva.')
-    return {'documento':json.loads(existing[1]),'repetido':True}
+    document=json.loads(existing[1]);return {'documento':requester_document(document) if actor['role']=='requisicion' else document,'repetido':True}
    ids=[line['materialId'] for line in canonical['partidas']]
    material_rows=dict(db.execute('SELECT id,payload FROM req_materials WHERE id IN ('+','.join('?' for _ in ids)+')',ids))
    snapshots=[]
@@ -218,15 +234,19 @@ class RequisitionStore:
   if branch and branch not in visible:raise PermissionError('No tienes acceso a esa sucursal o almacén.')
   where=' WHERE branch IN ('+','.join('?' for _ in visible)+')';params=tuple(visible)
   if branch:where+=' AND branch=?';params+=(branch,)
+  if actor and actor['role']=='requisicion':where+=' AND creator=?';params+=(actor['email'],)
   with self.store.connect() as db:
    count=db.execute('SELECT COUNT(*) FROM req_documents'+where,params).fetchone()[0]
    rows=db.execute('SELECT d.payload FROM req_documents d JOIN (SELECT rowid AS rid FROM req_documents'+where+' ORDER BY created_at DESC,rowid DESC LIMIT 50 OFFSET ?) p ON d.rowid=p.rid ORDER BY d.created_at DESC,d.rowid DESC',(*params,(page-1)*50)).fetchall()
   docs=[json.loads(r[0]) for r in rows]
+  if actor and actor['role']=='requisicion':docs=[requester_document(doc) for doc in docs]
   return {'solicitudes':[{k:v for k,v in d.items() if k!='partidas'}|{'totalPartidas':len(d['partidas'])} for d in docs],'total':count,'pagina':page,'tamano':50}
  def get(self,id,actor=None):
-  with self.store.connect() as db:row=db.execute('SELECT payload FROM req_documents WHERE id=?',(id,)).fetchone()
+  with self.store.connect() as db:row=db.execute('SELECT payload,creator FROM req_documents WHERE id=?',(id,)).fetchone()
   document=json.loads(row[0]) if row else None
-  return document if document and document['sucursal'] in visible_branches(actor) else None
+  own=not actor or actor['role']!='requisicion' or row and row[1]==actor['email']
+  if not document or not own or document['sucursal'] not in visible_branches(actor):return None
+  return requester_document(document) if actor and actor['role']=='requisicion' else document
 def document_csv(doc):return csv_bytes([['FOLIO','FECHA SERVIDOR','SUCURSAL','AREA','SOLICITANTE','SKU','ID MATERIAL','DESCRIPCION','CANTIDAD','UNIDAD','OBSERVACIONES','ESTADO','REVISION','MOTIVO CANCELACION'],*[ [doc['numero'],doc['fechaHora'],doc['sucursal'],doc['area'],doc['solicitante'],r['sku'],r['materialId'],r['nombre'],r['cantidad'],r['unidad'],r['observaciones'],doc['estado'],doc.get('revision',1),doc.get('cancelacion',{}).get('motivo','')] for r in doc['partidas']]])
 def print_document(doc):
  from app_info import TITLE,VERSION,SUPPORT_LINE

@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.3.1
+# RFQ_SKU_GMP · Versión 1.4.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -13,6 +13,10 @@ En Requisiciones → Imágenes por SKU puedes cargar archivos de imagen válidos
 El perfil **AUXTI** tiene acceso administrativo y puede descargar respaldos. Las bajas de SKU, desactivaciones de usuarios, cancelaciones o eliminación de partidas de requisiciones, vaciado y restauración de módulos requieren autorización de `sistemas@grupomipan.com`. Las solicitudes se revisan en **Autorizaciones → Autorizaciones de AUXTI**; los cambios de requisiciones se revisan en su pestaña correspondiente. Hasta aprobar, los datos se conservan. Se valida que los datos no hayan cambiado y se registra la decisión. AUXTI no puede asignarse Superadministrador, cambiar las cuentas de Superadministrador ni modificar accesos por perfil.
 
 **Accesos por perfil** permite controlar por separado SKU Ventas, SKU Compras, Requisiciones, Imágenes y Cargar maestros. Cargar un maestro requiere tanto acceso al módulo correspondiente como a Cargar maestros. Habilitar Imágenes a otro perfil permite consultar su sección, pero la modificación de fotos permanece reservada a Superadministrador y AUXTI.
+
+El perfil **Gerente** puede emitir requisiciones, cargar el maestro de materiales, configurar series y folios de las cuatro sucursales, gestionar reportes y autorizar cambios. No puede retroceder folios ni reutilizar series de otra sucursal. La actualización habilita Cargar maestros para las cuentas de Gerente existentes; Sistemas puede ajustar luego sus accesos.
+
+El perfil **Requisición** permite crear solicitudes y consultar exclusivamente las registradas por la propia cuenta en las sucursales asignadas en Usuarios, con impresión de esas solicitudes y propuestas de corrección que requieren aprobación de Gerente o Superadministrador. Las propuestas no cambian la solicitud hasta autorizarse. El alcance se comprueba también en el servidor y se basa en la cuenta que capturó, no en el nombre escrito en Solicitante. No tiene acceso a costos, reportes, maestros, series, autorizaciones de otras cuentas ni administración; tampoco puede cancelar solicitudes. Sus únicos submenús son Nueva solicitud y Mis requisiciones. En Usuarios puedes asignar el perfil a nuevas cuentas; no se crea una cuenta con contraseña predeterminada.
 
 ## Descargar EXE
 

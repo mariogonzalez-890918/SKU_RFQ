@@ -1,7 +1,13 @@
 """Cambios autorizados y trazables; nunca reutiliza folios ni altera fechas de emisión."""
 import decimal,json,uuid
-from requisiciones import AREAS,Conflict,now,text,visible_branches
+from requisiciones import AREAS,Conflict,now,text,visible_branches,requester_document
 EDITORS={'superadmin','gerente'}
+
+def requester_change(change):
+ result={key:change[key] for key in ('id','fecha','tipo','objetivo','folio','sucursal','revision','motivo','solicitadoPor','estado','resueltoPor','resuelto','comentario','perfilSolicitante','requiereSistemas') if key in change}
+ data=change.get('datos',{});result['datos']={key:data[key] for key in ('area','solicitante','observaciones') if key in data}
+ if 'partidas' in data:result['datos']['partidas']=requester_document({'partidas':data['partidas']})['partidas']
+ return result
 
 class WorkflowStore:
  def __init__(self,store,requisitions,reports):
@@ -12,7 +18,8 @@ class WorkflowStore:
    db.execute("CREATE INDEX IF NOT EXISTS req_changes_document ON req_changes(json_extract(payload,'$.objetivo'))")
    db.execute('CREATE TABLE IF NOT EXISTS req_document_versions(document_id TEXT NOT NULL,revision INTEGER NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(document_id,revision))')
  def _document(self,db,id,actor):
-  row=db.execute('SELECT payload FROM req_documents WHERE id=?',(id,)).fetchone();doc=json.loads(row[0]) if row else None
+  row=db.execute('SELECT payload,creator FROM req_documents WHERE id=?',(id,)).fetchone();doc=json.loads(row[0]) if row else None
+  if actor['role']=='requisicion' and (not row or row[1]!=actor['email']):raise PermissionError('Solo puedes solicitar correcciones de tus propias requisiciones.')
   if not doc or doc['sucursal'] not in visible_branches(actor):raise PermissionError('Solicitud no disponible en tus almacenes autorizados.')
   return doc
  def _prepare(self,db,data,actor):
@@ -55,9 +62,10 @@ class WorkflowStore:
   db.execute('UPDATE req_documents SET payload=? WHERE id=?',(json.dumps(doc,ensure_ascii=False),doc['id']))
   return doc
  def submit(self,data,actor):
-  if actor['role'] not in EDITORS|{'almacenista','auxti'}:raise PermissionError('Solo gerencia, superadministrador o almacenista pueden solicitar estos cambios.')
+  if actor['role']=='requisicion' and data.get('tipo')!='modificar':raise PermissionError('Este perfil solo puede solicitar correcciones; no puede cancelar ni autorizar solicitudes.')
+  if actor['role'] not in EDITORS|{'almacenista','auxti','requisicion'}:raise PermissionError('Solo gerencia, superadministrador o almacenista pueden solicitar estos cambios.')
   with self.store.connect() as db:
-   db.execute('BEGIN IMMEDIATE');c=self._prepare(db,data,actor);c.update({'id':uuid.uuid4().hex,'fecha':now(),'solicitadoPor':actor['email'],'estado':'PENDIENTE'})
+   db.execute('BEGIN IMMEDIATE');c=self._prepare(db,data,actor);c.update({'id':uuid.uuid4().hex,'fecha':now(),'solicitadoPor':actor['email'],'estado':'PENDIENTE','perfilSolicitante':actor['role']})
    # Un almacenista siempre espera autorización, incluso si conoce un ID de solicitud.
    result=None
    old=self._document(db,c['objetivo'],actor);removed=c['tipo']=='cancelar' or bool({r['materialId'] for r in old['partidas']}-{r['materialId'] for r in c['datos'].get('partidas',[])})
@@ -68,8 +76,11 @@ class WorkflowStore:
  def list(self,actor):
   branches=visible_branches(actor);clauses=['branch IN ('+','.join('?' for _ in branches)+')'];params=list(branches)
   if actor['role'] not in EDITORS|{'auxti'}:clauses.append('requester=?');params.append(actor['email'])
+  if actor['role']=='requisicion':clauses.append("json_extract(payload,'$.objetivo') IN (SELECT id FROM req_documents WHERE creator=?)");params.append(actor['email'])
   with self.store.connect() as db:rows=db.execute('SELECT payload FROM req_changes WHERE '+' AND '.join(clauses)+' ORDER BY created_at DESC,rowid DESC LIMIT 500',params).fetchall()
-  return {'cambios':[json.loads(row[0]) for row in rows],'puedeAutorizar':actor['role'] in EDITORS,'limite':500}
+  changes=[json.loads(row[0]) for row in rows]
+  if actor['role']=='requisicion':changes=[requester_change(c) for c in changes]
+  return {'cambios':changes,'puedeAutorizar':actor['role'] in EDITORS,'limite':500}
  def decide(self,id,data,actor):
   if actor['role'] not in EDITORS:raise PermissionError('Solo Gerente y Superadministrador pueden aprobar o rechazar cambios.')
   approved=data.get('aprobar');comment=text(data.get('comentario',''),1000)
@@ -89,6 +100,11 @@ class WorkflowStore:
      if not user or not user[1] or user[0]!='auxti':raise Conflict('El solicitante ya no es AUXTI activo. Rechaza la propuesta.')
      modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('auxti',)).fetchone()
      if not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('AUXTI perdió acceso al módulo. Rechaza la propuesta.')
+    elif c.get('perfilSolicitante')=='requisicion':
+     if not user or not user[1] or user[0]!='requisicion':raise Conflict('El solicitante ya no tiene activo el perfil Requisición. Rechaza la propuesta.')
+     modules=db.execute("SELECT modules FROM role_modules WHERE role='requisicion'").fetchone();owner=db.execute('SELECT creator FROM req_documents WHERE id=?',(c['objetivo'],)).fetchone()
+     access=db.execute('SELECT sucursales FROM user_requisition_access WHERE email=?',(c['solicitadoPor'],)).fetchone()
+     if not modules or 'requisiciones' not in json.loads(modules[0]) or not owner or owner[0]!=c['solicitadoPor'] or not access or c['sucursal'] not in json.loads(access[0]):raise Conflict('El solicitante perdió acceso a su requisición. Rechaza la propuesta.')
     else:
      if not user or not user[1] or user[0]!='almacenista':raise Conflict('El solicitante ya no es un almacenista activo. Rechaza la propuesta.')
      access=db.execute('SELECT almacenes FROM user_requisition_access WHERE email=?',(c['solicitadoPor'],)).fetchone();modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('almacenista',)).fetchone()
@@ -101,4 +117,6 @@ class WorkflowStore:
    self._document(db,id,actor)
    versions=[{'revision':rev,'documento':json.loads(payload)} for rev,payload in db.execute('SELECT revision,payload FROM req_document_versions WHERE document_id=? ORDER BY revision',(id,))]
    changes=[json.loads(row[0]) for row in db.execute("SELECT payload FROM req_changes WHERE json_extract(payload,'$.objetivo')=? ORDER BY created_at,rowid",(id,))]
+  if actor['role']=='requisicion':
+   versions=[{**v,'documento':requester_document(v['documento'])} for v in versions];changes=[requester_change(c) for c in changes]
   return {'versiones':versions,'cambios':changes}

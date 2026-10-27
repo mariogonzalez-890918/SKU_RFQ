@@ -44,6 +44,7 @@
 !/tests/test_backup_import.py
 !/tests/test_images.py
 !/tests/test_auxti.py
+!/tests/test_request_role.py
 !/tests/mobile_menu_regression.mjs
 **/__pycache__/
 *.pyc

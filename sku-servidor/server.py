@@ -5,7 +5,7 @@ sys.path.insert(0,str(ROOT))
 from ventas import SalesStore,export_master
 from requisiciones import RequisitionStore,Conflict as RequisitionConflict,print_document,document_csv,csv_bytes,BRANCHES,SCOPED_ROLES
 from urllib.parse import urlsplit,parse_qs
-from permissions import MODULES,DEFAULTS,require_module
+from permissions import MODULES,DEFAULTS,require_module,enabled_modules
 from reportes import ReportStore,report_csv
 from reporte_export import report_xlsx,report_pdf,select_detail
 from autorizaciones import WorkflowStore
@@ -18,7 +18,7 @@ APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',Fa
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
 ADMIN_EMAIL='sistemas@grupomipan.com'
-ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA'}
+ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN'}
 def read_scope(actor,scope):
  require_module(actor,scope)
 def write_scope(actor,scope):
@@ -99,6 +99,8 @@ class Store:
     for role in ('ventas','compras','alta'):
      row=db.execute('SELECT modules FROM role_modules WHERE role=?',(role,)).fetchone();modules=json.loads(row[0]);modules=list(dict.fromkeys(modules+['cargar_maestro']));db.execute('UPDATE role_modules SET modules=?,revision=revision+1 WHERE role=?',(json.dumps(modules),role))
     db.execute("INSERT INTO permission_features VALUES('capabilities-v1')")
+   if not db.execute("SELECT 1 FROM permission_features WHERE key='manager-requisitions-v2'").fetchone():
+    row=db.execute("SELECT modules FROM role_modules WHERE role='gerente'").fetchone();modules=list(dict.fromkeys(json.loads(row[0])+['requisiciones','cargar_maestro']));db.execute("UPDATE role_modules SET modules=?,revision=revision+1 WHERE role='gerente'",(json.dumps(modules),));db.execute("INSERT INTO permission_features VALUES('manager-requisitions-v2')")
    db.execute('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,email TEXT NOT NULL,csrf TEXT NOT NULL,expires REAL NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY,count INTEGER NOT NULL,until REAL NOT NULL)')
    if not db.execute('SELECT 1 FROM users WHERE email=?',(ADMIN_EMAIL,)).fetchone():
@@ -155,7 +157,7 @@ class Store:
   with self.connect() as db:
    row=db.execute('SELECT u.email,u.name,u.role,s.csrf,a.sucursales,a.almacenes,p.modules FROM sessions s JOIN users u ON s.email=u.email LEFT JOIN user_requisition_access a ON a.email=u.email LEFT JOIN role_modules p ON p.role=u.role WHERE s.token_hash=? AND s.expires>? AND u.active=1',(hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
   if not row or row[2] not in ROLES:return None
-  return {**dict(zip(('email','name','role','csrf'),row[:4])),'sucursales':json.loads(row[4] or '[]'),'almacenes':json.loads(row[5] or '[]'),'modulos':list(MODULES) if row[2]=='superadmin' else json.loads(row[6] or '[]')}
+  return {**dict(zip(('email','name','role','csrf'),row[:4])),'sucursales':json.loads(row[4] or '[]'),'almacenes':json.loads(row[5] or '[]'),'modulos':list(MODULES) if row[2]=='superadmin' else enabled_modules({'role':row[2],'modulos':json.loads(row[6] or '[]')})}
  def profiles(self):
   with self.connect() as db:rows=db.execute('SELECT role,modules,revision FROM role_modules ORDER BY rowid').fetchall()
   return {'perfiles':[{'perfil':role,'nombre':ROLES[role],'modulos':list(MODULES) if role=='superadmin' else json.loads(modules),'revision':revision} for role,modules,revision in rows],'modulos':MODULES}
@@ -164,6 +166,7 @@ class Store:
   role=data.get('perfil');modules=data.get('modulos');revision=data.get('revision')
   if role not in ROLES or role=='superadmin':raise ValueError('El superadministrador conserva acceso completo.')
   if not isinstance(modules,list) or any(not isinstance(m,str) or m not in MODULES for m in modules) or len(set(modules))!=len(modules) or type(revision) is not int:raise ValueError('Configuración de módulos inválida.')
+  if role=='requisicion' and any(m!='requisiciones' for m in modules):raise ValueError('El perfil Requisición solo permite crear y consultar sus propias solicitudes.')
   with self.connect() as db:
    db.execute('BEGIN IMMEDIATE');old=db.execute('SELECT revision FROM role_modules WHERE role=?',(role,)).fetchone()
    if old[0]!=revision:raise RequisitionConflict('Los accesos cambiaron. Actualiza los perfiles.')
@@ -199,7 +202,8 @@ class Store:
     assigned[field]=values
    if role=='gerente' and set(assigned['sucursales'])!=set(BRANCHES):raise ValueError('El gerente consulta las cuatro sucursales.')
    if role=='almacenista' and not assigned['almacenes']:raise ValueError('Selecciona al menos un almacén para el almacenista.')
-   if role!='gerente':assigned['sucursales']=[]
+   if role=='requisicion' and not assigned['sucursales']:raise ValueError('Selecciona al menos una sucursal para el perfil Requisición.')
+   if role not in ('gerente','requisicion'):assigned['sucursales']=[]
    if role!='almacenista':assigned['almacenes']=[]
    if not old and not password:raise ValueError('Define una contraseña para el usuario nuevo.')
    salt,digest=new_password(password) if password else old
@@ -255,7 +259,11 @@ def create_handler(store):
     try:
      require_module(actor,'requisiciones')
      query=parse_qs(urlsplit(self.path).query)
-     if path=='/api/requisiciones/imagenes':return self.reply(200,images.list(actor))
+     if actor['role']=='requisicion' and path not in ('/api/requisiciones','/api/requisiciones/meta','/api/requisiciones/materiales','/api/requisiciones/imagenes','/api/requisiciones/cambios') and not re.fullmatch('/api/requisiciones/(?:imagenes/[1-9][0-9]*|[a-f0-9]{32}(?:/(?:imprimir|historial))?)',path):raise PermissionError('Este perfil solo puede crear y consultar sus propias requisiciones.')
+     if path=='/api/requisiciones/imagenes':
+      photos=images.list(actor)
+      if actor['role']=='requisicion':photos={'puedeEditar':False,'imagenes':[{k:r[k] for k in ('materialId','imagenId')} for r in photos['imagenes']]}
+      return self.reply(200,photos)
      image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',path)
      if image_match:
       raw=images.get(int(image_match[1]),thumbnail=query.get('miniatura')==['1']);return self.reply(200,raw,'image/png' if query.get('miniatura')==['1'] else images.content_type(int(image_match[1]))) if raw is not None else self.reply(404,{'error':'Este material no tiene imagen.'})
@@ -271,7 +279,10 @@ def create_handler(store):
       if report_match[2]=='pdf':return self.reply(200,report_pdf(result),'application/pdf')
       return self.reply(200,report_csv(result),'text/csv; charset=utf-8') if report_match[2]=='csv' else self.reply(200,result)
      if path=='/api/requisiciones/meta':return self.reply(200,requisitions.metadata(actor))
-     if path=='/api/requisiciones/materiales':return self.reply(200,{'materiales':requisitions.materials()})
+     if path=='/api/requisiciones/materiales':
+      materials=requisitions.materials()
+      if actor['role']=='requisicion':materials=[{k:r.get(k,'') for k in ('id','sku','nombre','unidad','proveedor','estado','skuRepetido')} for r in materials if r['estado']=='ACTIVO']
+      return self.reply(200,{'materiales':materials})
      if path=='/api/requisiciones/catalogo.csv':
       rows=[['ID MATERIAL','SKU','DESCRIPCION','UNIDAD','PROVEEDOR','CATEGORIA','ESTADO'],*[ [r['id'],r['sku'],r['nombre'],r['unidad'],r['proveedor'],r['categoria'],r['estado']] for r in requisitions.materials()]]
       return self.reply(200,csv_bytes(rows),'text/csv; charset=utf-8')
@@ -345,6 +356,7 @@ def create_handler(store):
     if self.path=='/api/compras/importar' and self.command=='POST':
      read_scope(actor,'compras');require_module(actor,'cargar_maestro');return self.reply(200,purchases.run(self.read_body(),actor))
     if self.path.startswith('/api/requisiciones'):require_module(actor,'requisiciones')
+    if actor['role']=='requisicion' and self.path.startswith('/api/requisiciones') and not (self.path in ('/api/requisiciones','/api/requisiciones/cambios') and self.command=='POST'):raise PermissionError('Este perfil solo permite agregar requisiciones y consultar las propias.')
     if self.path=='/api/requisiciones/imagenes' and self.command=='POST':return self.reply(200,images.upload(self.read_body(),actor))
     image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',self.path)
     if image_match and self.command=='DELETE':return self.reply(200,images.remove(int(image_match[1]),actor))

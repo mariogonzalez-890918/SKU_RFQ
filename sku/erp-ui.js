@@ -2,7 +2,7 @@
 const gmpPaths={home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',buy:'<path d="M3 3h2l2.5 12h11L21 6H6"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/>',sell:'<path d="M20 13 11 22 2 13V3h10z"/><circle cx="7" cy="8" r="1"/>',box:'<path d="m3 7 9-5 9 5v10l-9 5-9-5zM3 7l9 5 9-5M12 12v10M7.5 4.5l9 5"/>',chart:'<path d="M4 3v18h17M8 16v-4M13 16V7M18 16V4"/>',check:'<path d="m9 12 2 2 4-5"/><path d="M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6z"/>',users:'<circle cx="9" cy="8" r="4"/><path d="M2 21v-3a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v3M17 4a4 4 0 0 1 0 8M22 21v-3a5 5 0 0 0-3-4.6"/>',lock:'<rect x="4" y="10" width="16" height="12" rx="3"/><path d="M8 10V6a4 4 0 0 1 8 0v4M12 15v3"/>',menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',logout:'<path d="M10 4H4v16h6M9 12h12m-4-4 4 4-4 4"/>',plus:'<path d="M12 4v16M4 12h16"/>',branch:'<circle cx="5" cy="4" r="2"/><circle cx="5" cy="20" r="2"/><circle cx="19" cy="4" r="2"/><path d="M5 6v12M19 6v2a4 4 0 0 1-4 4H5"/>',list:'<rect x="5" y="3" width="14" height="19" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>'};
 function gmpIcon(name){const span=document.createElement('span');span.innerHTML='<svg class="gmp-icon" viewBox="0 0 24 24" aria-hidden="true">'+(gmpPaths[name]||gmpPaths.box)+'</svg>';return span.firstChild;}
 function gmpLabel(button,label,icon){button.replaceChildren(gmpIcon(icon));const text=document.createElement('span');text.className='gmp-nav-text';text.textContent=label;button.append(text);button.title=label;button.setAttribute('aria-label',label);}
-const gmpAllowed={inicio:true,compras:canReadPurchases,ventas:salesRead,requisiciones:currentUser.modulos.includes('requisiciones'),reportes:currentUser.modulos.includes('requisiciones'),autorizaciones:canDelete||currentUser.modulos.includes('requisiciones')&&rwEnabled,usuarios:canDelete,perfiles:canDelete,respaldos:canDelete};
+const gmpAllowed={inicio:true,compras:canReadPurchases,ventas:salesRead,requisiciones:currentUser.modulos.includes('requisiciones'),reportes:currentUser.modulos.includes('requisiciones')&&currentUser.role!=='requisicion',autorizaciones:canDelete||currentUser.role!=='requisicion'&&currentUser.modulos.includes('requisiciones')&&rwEnabled,usuarios:canDelete,perfiles:canDelete,respaldos:canDelete};
 const gmpNames={inicio:'Inicio',compras:'SKU Compras',ventas:'SKU Ventas',requisiciones:'Requisición de materiales',reportes:'Reportes de requisición',autorizaciones:'Autorizaciones',usuarios:'Usuarios',perfiles:'Accesos por perfil',respaldos:'Respaldo y restauración'};
 const gmpViews={inicio:$('gmpHome'),compras:$('comprasPanel'),ventas:$('ventasPanel'),requisiciones:$('requisicionesPanel'),reportes:$('gmpReportsPage'),autorizaciones:$('gmpApprovalsPage'),usuarios:$('gmpUsersPage'),perfiles:$('gmpProfilesPage'),respaldos:$('gmpBackupsPage')};
 const gmpButtons={inicio:$('gmpNavHome'),compras:$('tabCompras'),ventas:$('tabVentas'),requisiciones:$('tabRequisiciones'),reportes:$('gmpNavReports'),autorizaciones:$('gmpNavApprovals'),usuarios:$('gmpNavUsers'),perfiles:$('gmpNavProfiles'),respaldos:$('gmpNavBackups')};
@@ -49,14 +49,14 @@ gmpTabs($('ventasPanel'),'ventas',[
  ['ayuda','Ayuda y códigos',[salesHelp,$('vCatalogos').closest('details')]]
 ],'catalogo');
 const gmpOriginalEdit=vEdit;vEdit=function(record){gmpSelect('ventas','nuevo');gmpOriginalEdit(record);};
-const reqHistoryHeading=$('rqHistSucursal').closest('.section-heading');
+const reqHistoryHeading=$('rqHistSucursal').closest('.section-heading');if(currentUser.role==='requisicion')reqHistoryHeading.querySelector('h3').textContent='Mis requisiciones emitidas';
 gmpTabs($('requisicionesPanel'),'requisiciones',[
  ['nueva','Nueva solicitud',[$('rqAlta')],rqCanWrite],
- ['historial','Historial',[reqHistoryHeading,$('rqHistTotal'),$('rqHistorial').closest('.scroll'),$('rqAnterior').closest('.actions')]],
- ['catalogo','Consultar materiales',[$('rqMasterInfo'),$('rqBuscarCatalogo').closest('details')]],
+ ['historial',currentUser.role==='requisicion'?'Mis requisiciones':'Historial',[reqHistoryHeading,$('rqHistTotal'),$('rqHistorial').closest('.scroll'),$('rqAnterior').closest('.actions')]],
+ ['catalogo','Consultar materiales',[$('rqMasterInfo'),$('rqBuscarCatalogo').closest('details')],currentUser.role!=='requisicion'],
  ['maestro','Cargar maestro',[$('rqCargarPanel')],rqCanImport],
  ['imagenes','Imágenes por SKU',[$('rqImagesPanel')],currentUser.modulos.includes('imagenes')],
- ['series','Series y folios',[$('rqSeriesPanel')],canDelete]
+ ['series','Series y folios',[$('rqSeriesPanel')],rqCanConfigure]
 ],rqCanWrite?'nueva':'historial');
 for(const panel of [$('rqAlta'),$('ventasAltaPanel'),$('nuevo').closest('details')]){panel.classList.add('gmp-flat-panel');panel.open=true;}
 $('rqBuscarCatalogo').closest('details').open=true;$('rqSeriesPanel').open=true;
@@ -108,7 +108,7 @@ gmpMetric('gmpMetricModules','Módulos habilitados','box',currentUser.modulos.le
 if(!currentUser.modulos.length)$('gmpHomeStatus').textContent='No tienes módulos asignados. Solicita acceso al superadministrador.';
 if(gmpAllowed.requisiciones)void rqJSON('/meta').then(meta=>{$('gmpMetricRequests').textContent=meta.totalSolicitudes;$('gmpMetricBranches').textContent=meta.sucursales.length;}).catch(()=>{$('gmpMetricRequests').textContent=$('gmpMetricBranches').textContent='—';$('gmpHomeStatus').textContent='No se pudieron actualizar los indicadores. Abre Requisiciones para reintentar.';});
 // Corrección de textos de ayuda para reflejar el flujo de autorización vigente.
-const gmpOldLocations=renderUserLocations;renderUserLocations=function(values){gmpOldLocations(values);if($('usuarioRol').value==='gerente')$('usuarioAccesosNota').textContent='Tiene acceso a las cuatro sucursales. Puede editar reportes, costos y autorizar cambios de requisiciones.';if($('usuarioRol').value==='almacenista')$('usuarioAccesosNota').textContent='Selecciona sus almacenes. Puede consultar sus requisiciones y proponer modificaciones o cancelaciones para aprobación.';};
+const gmpOldLocations=renderUserLocations;renderUserLocations=function(values){gmpOldLocations(values);if($('usuarioRol').value==='gerente')$('usuarioAccesosNota').textContent='Tiene acceso a las cuatro sucursales. Puede crear requisiciones, cargar maestros, modificar series y folios, editar reportes y autorizar cambios.';if($('usuarioRol').value==='almacenista')$('usuarioAccesosNota').textContent='Selecciona sus almacenes. Puede consultar sus requisiciones y proponer modificaciones o cancelaciones para aprobación.';};
 window.addEventListener('hashchange',()=>void gmpRenderRoute());await gmpRenderRoute();document.documentElement.setAttribute('data-erp-ready','true');
 
 

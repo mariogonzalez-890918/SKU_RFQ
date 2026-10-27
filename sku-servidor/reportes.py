@@ -175,6 +175,7 @@ class ReportStore:
    context.prec=60
    return self._run(actor,id,preview)
  def _run(self,actor,id=None,preview=None):
+  if actor['role']=='requisicion':raise PermissionError('Este perfil solo puede consultar sus propias requisiciones.')
   if preview is not None:
    if actor['role'] not in EDITORS:raise PermissionError('Solo los editores pueden armar un reporte.')
    c=self.config(preview)

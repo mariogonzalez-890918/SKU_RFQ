@@ -1,4 +1,4 @@
-const rqCanWrite=['superadmin','auxti','ventas','compras','alta'].includes(currentUser.role),rqCanImport=canLoadMasters&&currentUser.modulos.includes('requisiciones');
+const rqCanWrite=['superadmin','auxti','gerente','requisicion','ventas','compras','alta'].includes(currentUser.role),rqCanConfigure=['superadmin','auxti','gerente'].includes(currentUser.role),rqCanImport=canLoadMasters&&currentUser.modulos.includes('requisiciones');
 let rqMeta=null,rqMaterials=[],rqLines=[],rqPage=1,rqBusy=false,rqImportPending=null,rqSelectedDoc=null;
 let rqHistoryGeneration=0,rqRefreshGeneration=0;
 const rqNewKey=()=>typeof crypto!=='undefined'&&crypto.getRandomValues?Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join(''):'req_'+Date.now()+'_'+Math.random().toString(36).slice(2)+'_'+Math.random().toString(36).slice(2);
@@ -58,7 +58,7 @@ $('rqArchivo').onchange=async e=>{rqImportPending=null;$('rqImportar').disabled=
 $('rqImportar').onclick=async()=>{if(!rqImportPending)return;$('rqImportar').disabled=true;try{const data=await rqJSON('/maestro',{method:'POST',body:JSON.stringify(rqImportPending)});rqImportPending=null;await rqLoad();$('rqImportMensaje').textContent=data.agregados+' nuevos · '+(data.actualizados||0)+' actualizados · '+(data.omitidos||0)+' filas por revisar. UM_ENTREGA se usa para solicitar y costear. Hoja '+data.hoja+'.';}catch(err){$('rqImportMensaje').textContent=err.message;$('rqImportar').disabled=!rqImportPending;}};
 $('rqSerieSucursal').onchange=rqFillSeries;$('rqSerieForm').onsubmit=async e=>{e.preventDefault();try{const branch=rqMeta.sucursales.find(b=>b.sucursal===$('rqSerieSucursal').value);const meta=await rqJSON('/series',{method:'PUT',body:JSON.stringify({sucursal:branch.sucursal,serie:$('rqSerie').value,siguiente:Number($('rqSiguiente').value),revision:branch.revision})});rqApplyMeta(meta);$('rqSerieMensaje').textContent='Serie y folio actualizados.';}catch(err){$('rqSerieMensaje').textContent=err.message;try{rqApplyMeta(await rqJSON('/meta'));}catch{}}};
 $('rqDetalleCerrar').onclick=()=>$('rqDetalle').close();$('rqDetalleCSV').onclick=async()=>{if(!rqSelectedDoc)return;try{download(await(await rqAPI('/'+rqSelectedDoc.id+'/csv')).blob(),rqSelectedDoc.numero+'.csv');}catch(err){rqMessage(err.message);}};
-$('rqAlta').hidden=!rqCanWrite;$('rqCargarPanel').hidden=!rqCanImport;$('rqSeriesPanel').hidden=!canDelete;rqRenderLines();$('tabRequisiciones').hidden=!currentUser.modulos.includes('requisiciones');document.documentElement?.setAttribute('data-requisiciones-ready','true');
+$('rqAlta').hidden=!rqCanWrite;$('rqCargarPanel').hidden=!rqCanImport;$('rqSeriesPanel').hidden=!rqCanConfigure;rqRenderLines();$('tabRequisiciones').hidden=!currentUser.modulos.includes('requisiciones');document.documentElement?.setAttribute('data-requisiciones-ready','true');
 
 
 
