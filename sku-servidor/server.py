@@ -158,7 +158,7 @@ class Store:
   return {**dict(zip(('email','name','role','csrf'),row[:4])),'sucursales':json.loads(row[4] or '[]'),'almacenes':json.loads(row[5] or '[]'),'modulos':list(MODULES) if row[2]=='superadmin' else json.loads(row[6] or '[]')}
  def profiles(self):
   with self.connect() as db:rows=db.execute('SELECT role,modules,revision FROM role_modules ORDER BY rowid').fetchall()
-  return {'perfiles':[{'perfil':role,'nombre':ROLES[role],'modulos':json.loads(modules),'revision':revision} for role,modules,revision in rows],'modulos':MODULES}
+  return {'perfiles':[{'perfil':role,'nombre':ROLES[role],'modulos':list(MODULES) if role=='superadmin' else json.loads(modules),'revision':revision} for role,modules,revision in rows],'modulos':MODULES}
  def save_profile(self,data,actor):
   if actor['role']!='superadmin':raise PermissionError('Solo el superadministrador puede configurar accesos por perfil.')
   role=data.get('perfil');modules=data.get('modulos');revision=data.get('revision')

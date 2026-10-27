@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.3.0
+# RFQ_SKU_GMP · Versión 1.3.1
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 

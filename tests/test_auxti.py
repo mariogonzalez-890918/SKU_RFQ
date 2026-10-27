@@ -8,6 +8,11 @@ class AuxTiTests(unittest.TestCase):
  def tearDown(self):self.case.tearDown()
  def propose(self,action,data):return self.case.value('/api/autorizaciones-admin',{'accion':action,'datos':data,'motivo':'Prueba de autorización'},self.aux)['solicitud']
  def decide(self,r,actor=None,approve=True):return self.case.call('/api/autorizaciones-admin/'+r['id']+'/resolver',{'aprobar':approve,'comentario':'Decisión de Sistemas'},actor or self.case.admin)
+ def test_existing_superadmin_profile_shows_all_new_capabilities(self):
+  import json
+  with self.case.store.connect() as db:db.execute("UPDATE role_modules SET modules=? WHERE role='superadmin'",(json.dumps(['ventas','compras','requisiciones']),))
+  profiles=self.case.value('/api/perfiles');owner=next(p for p in profiles['perfiles'] if p['perfil']=='superadmin');self.assertEqual(set(owner['modulos']),set(profiles['modulos']));self.assertIn('imagenes',owner['modulos']);self.assertIn('cargar_maestro',owner['modulos'])
+
  def test_catalog_baja_requires_owner_and_is_single_use(self):
   catalog=self.case.value('/api/catalogo',actor=self.aux);edited=copy.deepcopy(catalog);record=edited['state']['registros'][0];record['eliminado']=True;edited['state']['reservados'].append(record['sku'])
   self.assertEqual(self.case.call('/api/catalogo',edited,self.aux,'PUT')[0],403)
