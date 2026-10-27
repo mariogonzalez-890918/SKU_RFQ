@@ -41,6 +41,31 @@ class ModuleBackupTests(unittest.TestCase):
   return self.value('/api/requisiciones',{'sucursal':'EJIDOS','area':'Produccion Donas','solicitante':'PRUEBA','observaciones':'','claveCliente':uuid.uuid4().hex,'partidas':[{'materialId':material['id'],'cantidad':quantity,'observaciones':''}]})['documento']
  def review(self,module,backup):return self.value('/api/respaldos/restaurar/revisar',{'modulo':module,'respaldo':backup})
  def restore(self,module,backup,review):return self.value('/api/respaldos/restaurar/confirmar',{'modulo':module,'respaldo':backup,'huellaActual':review['huellaActual'],'confirmar':True})
+ def test_detail_excel_selection_and_grand_total(self):
+  import xml.etree.ElementTree as ET
+  self.import_req([product()]);first=self.create_req('2');self.create_req('3')
+  config=self.value('/api/requisiciones/reportes/general/ejecutar')['configuracion'];config['agrupacion']='requisicion';config['impuestos']=[{'nombre':'IVA','tasa':'16'}]
+  result=self.value('/api/requisiciones/reportes/vista-previa',config)
+  self.assertEqual(result['resumen']['total'],'58.00');group=next(g for g in result['grupos'] if g['grupo']==first['numero'])
+  selection={k:group[k] for k in ('grupo','materialId','unidad')}
+  status,body,_=self.call('/api/requisiciones/reportes/exportar/xlsx',{'configuracion':config,'seleccion':selection})
+  self.assertEqual(status,200,body[:200])
+  ns={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+  with zipfile.ZipFile(io.BytesIO(body)) as z:
+   xml=ET.fromstring(z.read('xl/worksheets/sheet3.xml'));rows=xml.findall('s:sheetData/s:row',ns)
+   self.assertEqual(len(rows),3)
+   self.assertIn(first['numero'],''.join(rows[1].itertext()))
+   self.assertIn('GRAN TOTAL',''.join(rows[-1].itertext()))
+   values={c.attrib['r']:''.join(c.itertext()) for c in rows[-1]}
+   self.assertEqual(values['K3'],'20.00');self.assertEqual(values['L3'],'23.20')
+   self.assertEqual(xml.find('s:autoFilter',ns).attrib['ref'],'A1:L2')
+   self.assertNotIn('ORIGEN',''.join(rows[0].itertext()))
+   for name in ('sheet1','sheet2','sheet3'):
+    content=''.join(ET.fromstring(z.read('xl/worksheets/'+name+'.xml')).itertext()).upper()
+    for removed in ('IMPUESTOS','PENDIENTE','ORIGEN','IVA 16'):self.assertNotIn(removed,content)
+  selection['grupo']='SUCURSAL NO AUTORIZADA'
+  self.assertEqual(self.call('/api/requisiciones/reportes/exportar/xlsx',{'configuracion':config,'seleccion':selection})[0],400)
+
  def test_productos_update_sku_export_and_no_duplicates(self):
   row=product();preview=self.import_purchase([row],True);self.assertEqual(preview['resumen']['agregados'],1);self.assertEqual(self.value('/api/catalogo')['state']['maxId'],0)
   self.import_purchase([row]);before=self.value('/api/catalogo')['state']['registros'][0];self.assertEqual(len(before['sku']),14)

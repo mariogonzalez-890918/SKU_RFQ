@@ -7,7 +7,7 @@ from requisiciones import RequisitionStore,Conflict as RequisitionConflict,print
 from urllib.parse import urlsplit,parse_qs
 from permissions import MODULES,DEFAULTS,require_module
 from reportes import ReportStore,report_csv
-from reporte_export import report_xlsx,report_pdf
+from reporte_export import report_xlsx,report_pdf,select_detail
 from autorizaciones import WorkflowStore
 from compras import PurchaseImporter,export_products
 from respaldos import BackupStore
@@ -315,7 +315,7 @@ def create_handler(store):
     if decision and self.command=='POST':return self.reply(200,workflow.decide(decision[1],self.read_body(),actor))
     export_match=re.fullmatch('/api/requisiciones/reportes/exportar/(xlsx|pdf)',self.path)
     if export_match and self.command=='POST':
-     data=self.read_body();result=reports.run(actor,id=data.get('id'),preview=data.get('configuracion'))
+     data=self.read_body();result=select_detail(reports.run(actor,id=data.get('id'),preview=data.get('configuracion')),data.get('seleccion'))
      return self.reply(200,report_xlsx(result),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') if export_match[1]=='xlsx' else self.reply(200,report_pdf(result),'application/pdf')
     if self.path=='/api/requisiciones' and self.command=='POST':
      result=requisitions.create(self.read_body(),actor);return self.reply(200 if result['repetido'] else 201,result)

@@ -9,14 +9,33 @@ def _metadata(r):
 
 def _number(value):return decimal.Decimal(value) if value is not None else None
 
+def select_detail(r,selection):
+ """Selecciona un grupo del resultado autorizado, nunca partidas enviadas por el cliente."""
+ if selection is None:return r
+ if not isinstance(selection,dict):raise ValueError('Selección de detalle inválida.')
+ mode=r['configuracion']['agrupacion']
+ groups=[g for g in r['grupos'] if all(g.get(k)==selection.get(k) for k in ('grupo','materialId','unidad'))]
+ if len(groups)!=1:raise ValueError('El grupo cambió. Genera de nuevo el reporte.')
+ g=groups[0]
+ def matches(d):
+  return mode=='general' or mode=='sucursal' and d['sucursal']==g['grupo'] or mode=='area' and d['area']==g['grupo'] or mode=='requisicion' and d['folio']==g['grupo'] or mode=='material' and d['materialId']==g['materialId'] and d['unidad']==g['unidad'] or mode=='unidad' and d['unidad']==g['unidad']
+ detail=[d for d in r['detalle'] if matches(d)]
+ with decimal.localcontext() as ctx:
+  ctx.prec=60
+  def total(key):return format(sum((decimal.Decimal(d[key]) for d in detail if d[key] is not None),decimal.Decimal(0)),'.2f')
+  summary={**r['resumen'],'base':total('costoCompra'),'impuestos':total('importeImpuestos'),'total':total('total'),'partidas':len(detail),'requisiciones':len({d['requisicionId'] for d in detail}),'pendientes':sum(bool(d['pendiente']) for d in detail)}
+ summary['completo']=not summary['pendientes']
+ return {**r,'configuracion':{**r['configuracion'],'nombre':r['configuracion']['nombre']+' · '+g['grupo']},'detalle':detail,'grupos':[g],'resumen':summary,'alcance':sorted({d['sucursal'] for d in detail})}
+
 def report_xlsx(r):
- sheets=[('Resumen',_metadata(r),[36,110],False),('Grupos',[['GRUPO','ID MATERIAL','UNIDAD','CANTIDAD','REQUISICIONES','COSTO COMPRA','IMPUESTOS','TOTAL','PENDIENTES']]+[[g['grupo'],g['materialId'] or '',g['unidad'],_number(g['cantidad']),g['requisiciones'],_number(g['base']),_number(g['impuestos']),_number(g['total']),g['pendientes']] for g in r['grupos']],[40,14,20,18,18,22,22,22,16],True)]
- taxes=r['configuracion']['impuestos']
- headers=['FOLIO','FECHA','SUCURSAL','ÁREA','SOLICITANTE','SKU','DESCRIPCIÓN','CANTIDAD','UNIDAD','COSTO UNITARIO','COSTO COMPRA']+[t['nombre']+' '+t['tasa']+'%' for t in taxes]+['IMPUESTOS','TOTAL','PENDIENTE / ORIGEN']
+ metadata=[row for row in _metadata(r) if 'impuestos' not in row[0].lower() and 'pendientes' not in row[0].lower()]
+ sheets=[('Resumen',metadata,[36,110],False),('Grupos',[['GRUPO','ID MATERIAL','UNIDAD','CANTIDAD','REQUISICIONES','COSTO COMPRA','TOTAL']]+[[g['grupo'],g['materialId'] or '',g['unidad'],_number(g['cantidad']),g['requisiciones'],_number(g['base']),_number(g['total'])] for g in r['grupos']],[40,14,20,18,18,22,22],True)]
+ headers=['FOLIO','FECHA','SUCURSAL','ÁREA','SOLICITANTE','SKU','DESCRIPCIÓN','CANTIDAD','UNIDAD','COSTO UNITARIO','COSTO COMPRA','TOTAL']
  rows=[headers]
  for d in r['detalle']:
-  rows.append([d['folio'],d['fecha'],d['sucursal'],d['area'],d['solicitante'],d['sku'],d['descripcion'],_number(d['cantidad']),d['unidad'],_number(d['costoUnitario']),_number(d['costoCompra'])]+[_number(t['importe']) for t in d['impuestos']]+[_number(d['importeImpuestos']),_number(d['total']),d['pendiente'] or d['origenCosto']])
- sheets.append(('Detalle',rows,[24,14,20,36,30,22,55,18,22,24,24]+[22]*len(taxes)+[22,24,65],True))
+  rows.append([d['folio'],d['fecha'],d['sucursal'],d['area'],d['solicitante'],d['sku'],d['descripcion'],_number(d['cantidad']),d['unidad'],_number(d['costoUnitario']),_number(d['costoCompra']),_number(d['total'])])
+ s=r['resumen'];rows.append(['GRAN TOTAL'+(' PARCIAL' if s['pendientes'] else '')]+['']*9+[_number(s['base']),_number(s['total'])])
+ sheets.append(('Detalle',rows,[24,14,20,36,30,22,55,18,22,24,24,24],True))
  def col(n):
   s=''
   while n:n,v=divmod(n-1,26);s=chr(65+v)+s
@@ -39,7 +58,7 @@ def report_xlsx(r):
   for i,(name,rows,widths,filtered) in enumerate(sheets,1):
    xml='<worksheet xmlns="'+ns+'"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>'+''.join('<col min="'+str(j)+'" max="'+str(j)+'" width="'+str(w)+'" customWidth="1"/>' for j,w in enumerate(widths,1))+'</cols><sheetData>'
    xml+=''.join('<row r="'+str(n)+'">'+''.join(cell(value,col(j)+str(n),n==1) for j,value in enumerate(row,1))+'</row>' for n,row in enumerate(rows,1))+'</sheetData>'
-   if filtered:xml+='<autoFilter ref="A1:'+col(len(widths))+str(len(rows))+'"/>'
+   if filtered:xml+='<autoFilter ref="A1:'+col(len(widths))+str(max(1,len(rows)-(1 if name=='Detalle' else 0)))+'"/>'
    z.writestr('xl/worksheets/sheet'+str(i)+'.xml',xml+'</worksheet>')
  return output.getvalue()
 
