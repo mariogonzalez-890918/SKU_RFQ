@@ -1,5 +1,74 @@
 # Generador de SKU GMP
 
+GENERADOR DE SKU GMP - MAESTROS, UNIDAD DE ENTREGA Y RESPALDOS
+
+MAESTRO DE COMPRAS
+En SKU Compras > Cargar listas > Actualizar maestro de compras · PRODUCTOS,
+selecciona el XLSX. Se utiliza únicamente PRODUCTOS, nunca las otras hojas.
+La revisión muestra nuevos, actualizados, SKU que cambiarán y filas ambiguas.
+Pulsa Confirmar actualización para aplicar el lote en una sola transacción.
+El archivo corregido proporcionado se validó como referencia de 700 productos.
+
+Se identifica por SKU cuando existe y, si falta, por descripción/proveedor
+y clasificación. No se usa el número de fila como identificador del artículo.
+Los artículos identificados se actualizan y los nuevos reciben ID y SKU.
+Cuando cambia la clasificación se recalcula el SKU y se reserva el anterior.
+Una clasificación vacía conserva la existente; en artículos nuevos usa 00.
+Los productos que no aparecen en el archivo se conservan. Las bajas no se
+reactivan. Las coincidencias ambiguas o cambios que crearían duplicados se
+omiten y se muestran para corregirlos en el archivo y volverlo a cargar.
+
+El maestro descargado usa PRODUCTOS y escribe el SKU nuevo en D. Conserva
+los campos adicionales del producto (precios, unidades, proveedor, etc.).
+Los SKU históricos de ventas en A mantienen su protección.
+
+REQUISICIONES Y COSTOS
+El maestro de requisiciones se actualiza por separado en Requisición de
+materiales > Maestro de materiales. La carga mantiene los ID internos,
+actualiza los productos identificados y evita agregar otra copia al cambiar
+su SKU o unidad. Las solicitudes emitidas conservan sus datos originales.
+
+La unidad utilizada para solicitar y entregar es UM_ENTREGA (columna N en
+el archivo de referencia). Tiene prioridad sobre UM_ENTREGA SUCURSALES.
+En el reporte: importe de compra = cantidad solicitada x costo por UM_ENTREGA.
+Si UM_COMPRA es distinta, costo de entrega = precio de compra / equivalencia.
+Ejemplo: bolsa de 10 KG a 100; UM_ENTREGA KILO; equivalencia 10; costo por
+KILO 10; solicitar 3 KILOS produce importe de compra 30 antes de impuestos.
+Los impuestos siguen siendo los guardados por Gerente o Superadministrador.
+
+Una equivalencia cero/faltante queda pendiente, sin división entre cero ni
+costo gratuito. Los importes pendientes se excluyen del total valorizado y
+el reporte indica TOTAL PARCIAL. Si cambió la unidad de una equivalencia
+manual, el editor debe confirmarla de nuevo. Las conversiones físicas
+inequívocas permiten costear unidades históricas sin alterar la solicitud.
+
+RESPALDO Y RESTAURACIÓN
+Solo Superadministrador tiene el menú Respaldo y restauración.
+1. Selecciona SKU Compras, SKU Ventas o Requisición de compras/materiales.
+2. Pulsa Descargar respaldo del módulo y conserva el archivo JSON.
+3. Para restaurar, selecciona ese mismo módulo y su archivo (hasta 80 MB).
+4. Pulsa Revisar respaldo. Se comparan los datos actuales con el contenido
+   y se valida la integridad, estructura y referencias. Todavía no se modifica nada.
+5. Marca la confirmación y pulsa Restaurar módulo seleccionado.
+
+Solo se reemplaza el módulo elegido. Los otros módulos, usuarios, contraseñas
+y permisos no se reemplazan. Antes de aplicar, el servidor guarda una copia
+automática en data/respaldos/ y permite descargarla al terminar. La aplicación
+se recarga para evitar que se usen datos anteriores en pantalla.
+
+Requisiciones incluye materiales, archivos maestros, solicitudes/cancelaciones,
+series/folios, costos, reportes, autorizaciones y versiones históricas.
+Los máximos de consecutivos y folios se conservan para no reutilizarlos.
+Si otra persona cambió el módulo desde la revisión, vuelve a revisarlo.
+Un archivo corrupto, de otro módulo o sin validación no se restaura.
+También se admiten los respaldos antiguos de catálogo de compras/ventas.
+
+ACTUALIZACIÓN DEL EXE
+Detén el anterior, respalda data y reemplaza el EXE conservando data y config.json.
+Al iniciar se ajusta la prioridad de UM_ENTREGA a partir del maestro guardado,
+sin cambiar los folios ni los datos de las solicitudes ya emitidas.
+
+
 GENERADOR DE SKU GMP - WINDOWS DE 64 BITS
 
 1. Copia la carpeta a una ruta fija del servidor, por ejemplo C:\SKU-JAD.
@@ -51,6 +120,48 @@ Consulta AUTORIZACIONES-Y-DESCARGAS.txt para Excel, PDF y cambios autorizados.
 
 NUEVA INTERFAZ: consulta INTERFAZ-Y-MENU.txt para el menú lateral y las vistas.
 
+
+ACTUALIZACIÓN DE MAESTROS Y RESPALDOS: consulta MAESTROS-Y-RESPALDOS.txt.
+
+
+
+GENERADOR DE SKU GMP - NUEVA NAVEGACIÓN
+
+INICIO
+Al iniciar sesión verás las tarjetas de las herramientas permitidas para tu
+perfil. Los accesos rápidos permiten comenzar una requisición o crear un SKU.
+Los indicadores respetan las sucursales y almacenes autorizados de tu cuenta.
+
+MENÚ IZQUIERDO
+- SKU Compras: Catálogo, Nuevo artículo, Cargar listas, Ayuda y códigos.
+- SKU Ventas: Catálogo, Nuevo artículo, Cargar listas, Ayuda y códigos.
+- Requisición de materiales: Nueva solicitud, Historial, Maestro de materiales
+  y Series y folios. Solo aparecen las opciones permitidas por tu perfil.
+- Reportes de requisición: selecciona el reporte y pulsa Ver reporte. Desde
+  aquí descargas Excel, PDF o CSV. Los filtros e impuestos están en Configurar
+  filtros e impuestos; solo los pueden editar Gerente y Superadministrador.
+- Autorizaciones: propuestas de corrección o cancelación y sus resoluciones.
+  El almacenista consulta sus propuestas; Gerente/Superadministrador resuelven.
+- Usuarios y Accesos por perfil: administración exclusiva de Superadministrador.
+
+Para modificar o cancelar, entra a Requisición > Historial > Ver solicitud.
+Se conserva el flujo de autorización y el historial. Las canceladas se excluyen
+del costeo. Los costos y equivalencias siguen en Reportes de requisición.
+
+El botón de tres líneas contrae el menú en computadora y lo despliega en
+pantallas pequeñas. En computadora puedes usar el botón Atrás del navegador
+para volver a la pantalla anterior. Los formularios conservan los datos
+mientras navegas entre las vistas de la misma sesión/página.
+
+La ayuda de los SKU se encuentra en Ayuda y códigos, separada de la captura.
+Los maestros de requisiciones se cargan/descargan en Maestro de materiales.
+No se necesitan fuentes, imágenes ni librerías de un sitio externo para usar
+la nueva interfaz en tu red local, Radmin o ZeroTier.
+
+ACTUALIZAR
+Detén la versión anterior y respalda data antes de reemplazar el EXE.
+Conserva data y config.json. Esta actualización reorganiza la interfaz;
+no reinicia usuarios, catálogos, solicitudes, permisos ni folios.
 
 
 GENERADOR DE SKU GMP - REQUISICION DE MATERIALES
@@ -276,43 +387,4 @@ en su carpeta habitual. Conserva data y config.json. La actualización agrega
 tablas de autorizaciones e historial sin reiniciar usuarios, SKU o folios.
 No ejecutes dos versiones contra la misma base de datos al mismo tiempo.
 
-
-
-GENERADOR DE SKU GMP - NUEVA NAVEGACIÓN
-
-INICIO
-Al iniciar sesión verás las tarjetas de las herramientas permitidas para tu
-perfil. Los accesos rápidos permiten comenzar una requisición o crear un SKU.
-Los indicadores respetan las sucursales y almacenes autorizados de tu cuenta.
-
-MENÚ IZQUIERDO
-- SKU Compras: Catálogo, Nuevo artículo, Cargar listas, Ayuda y códigos.
-- SKU Ventas: Catálogo, Nuevo artículo, Cargar listas, Ayuda y códigos.
-- Requisición de materiales: Nueva solicitud, Historial, Maestro de materiales
-  y Series y folios. Solo aparecen las opciones permitidas por tu perfil.
-- Reportes de requisición: selecciona el reporte y pulsa Ver reporte. Desde
-  aquí descargas Excel, PDF o CSV. Los filtros e impuestos están en Configurar
-  filtros e impuestos; solo los pueden editar Gerente y Superadministrador.
-- Autorizaciones: propuestas de corrección o cancelación y sus resoluciones.
-  El almacenista consulta sus propuestas; Gerente/Superadministrador resuelven.
-- Usuarios y Accesos por perfil: administración exclusiva de Superadministrador.
-
-Para modificar o cancelar, entra a Requisición > Historial > Ver solicitud.
-Se conserva el flujo de autorización y el historial. Las canceladas se excluyen
-del costeo. Los costos y equivalencias siguen en Reportes de requisición.
-
-El botón de tres líneas contrae el menú en computadora y lo despliega en
-pantallas pequeñas. En computadora puedes usar el botón Atrás del navegador
-para volver a la pantalla anterior. Los formularios conservan los datos
-mientras navegas entre las vistas de la misma sesión/página.
-
-La ayuda de los SKU se encuentra en Ayuda y códigos, separada de la captura.
-Los maestros de requisiciones se cargan/descargan en Maestro de materiales.
-No se necesitan fuentes, imágenes ni librerías de un sitio externo para usar
-la nueva interfaz en tu red local, Radmin o ZeroTier.
-
-ACTUALIZAR
-Detén la versión anterior y respalda data antes de reemplazar el EXE.
-Conserva data y config.json. Esta actualización reorganiza la interfaz;
-no reinicia usuarios, catálogos, solicitudes, permisos ni folios.
 

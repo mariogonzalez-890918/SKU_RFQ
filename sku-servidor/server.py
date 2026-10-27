@@ -9,6 +9,8 @@ from permissions import MODULES,DEFAULTS,require_module
 from reportes import ReportStore,report_csv
 from reporte_export import report_xlsx,report_pdf
 from autorizaciones import WorkflowStore
+from compras import PurchaseImporter,export_products
+from respaldos import BackupStore
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
@@ -68,11 +70,14 @@ def protect(old,new):
   updated=current[id]
   if r['eliminado'] and any(updated.get(k)!=v for k,v in r.items() if k!='fila'):raise ValueError('Un artículo dado de baja no puede reactivarse ni cambiar.')
   if r['sku']!=updated['sku'] or updated['eliminado']:reserved.add(r['sku'])
+ active_identities={}
+ for r in b['registros']:
+  if not r['eliminado']:active_identities.setdefault(identity(r),[]).append(r['id'])
  for r in b['registros']:
   if r['id'] not in previous and r['id']<=a['maxId']:raise ValueError('El identificador ya fue utilizado.')
   oldrow=previous.get(r['id'])
   if not r['eliminado'] and (oldrow is None or identity(oldrow)!=identity(r)):
-   if any(x['id']!=r['id'] and not x['eliminado'] and identity(x)==identity(r) for x in b['registros']):raise ValueError('El artículo ya existe con la misma clasificación y proveedor.')
+   if len(active_identities[identity(r)])>1:raise ValueError('El artículo ya existe con la misma clasificación y proveedor.')
  b['reservados']=sorted(reserved)
 class Store:
  def __init__(self,directory,initial_admin=None):
@@ -106,7 +111,7 @@ class Store:
   with self.connect() as db:
    db.execute('BEGIN IMMEDIATE');rev,payload=db.execute('SELECT revision,payload FROM catalog WHERE id=1').fetchone()
    if data['revision']!=rev:return None
-   updated={'state':data.get('state'),'master':data.get('master')};validate(updated,self.catalogs);old=json.loads(payload)
+   old=json.loads(payload);updated={**old,'state':data.get('state'),'master':data.get('master')};validate(updated,self.catalogs)
    if updated['master']!=old['master']:raise ValueError('Las cargas agregan artículos sin reemplazar el maestro existente.')
    if actor['role']!='superadmin':
     previous={r['id']:r for r in old['state']['registros']}
@@ -178,6 +183,8 @@ def create_handler(store):
  requisitions=RequisitionStore(store)
  reports=ReportStore(store,requisitions)
  workflow=WorkflowStore(store,requisitions,reports)
+ purchases=PurchaseImporter(store,sku,validate,protect)
+ backups=BackupStore(store,validate,reports)
  class Handler(http.server.BaseHTTPRequestHandler):
   def auth(self):
    cookie=http.cookies.SimpleCookie()
@@ -198,6 +205,19 @@ def create_handler(store):
     name='index.html' if actor else 'login.html';return self.reply(200,(ROOT/'public'/name).read_bytes(),'text/html; charset=utf-8')
    if not actor:return self.reply(401,{'error':'Inicia sesión para continuar.'})
    if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES})
+   if path.startswith('/api/respaldos'):
+    try:
+     previous=re.fullmatch('/api/respaldos/previo/([a-f0-9]{32})',path)
+     if previous:return self.reply(200,backups.previous(previous[1],actor),'application/json; charset=utf-8')
+     if path=='/api/respaldos':return self.reply(200,backups.create(parse_qs(urlsplit(self.path).query).get('modulo',[''])[0],actor))
+     return self.reply(404,{'error':'No encontrado.'})
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except ValueError as e:return self.reply(400,{'error':str(e)})
+   if path=='/api/compras/excel':
+    try:
+     read_scope(actor,'compras');return self.reply(200,export_products(store.get(),store.catalogs),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except ValueError as e:return self.reply(400,{'error':str(e)})
    if path=='/api/perfiles':
     if actor['role']!='superadmin':return self.reply(403,{'error':'Solo superadministrador.'})
     return self.reply(200,store.profiles())
@@ -249,7 +269,8 @@ def create_handler(store):
    self.reply(404,{'error':'No encontrado.'})
   def read_body(self):
    length=int(self.headers.get('Content-Length','0'))
-   if not 0<length<=MAX_BODY:raise ValueError('Archivo demasiado grande o solicitud vacía.')
+   limit=128*1024*1024 if self.path.startswith('/api/respaldos/restaurar') else MAX_BODY
+   if not 0<length<=limit:raise ValueError('Archivo demasiado grande o solicitud vacía.')
    data=json.loads(self.rfile.read(length))
    if not isinstance(data,dict):raise ValueError('Solicitud inválida.')
    return data
@@ -272,6 +293,9 @@ def create_handler(store):
      if actor['role']!='superadmin':raise PermissionError('Solo el super administrador puede administrar usuarios.')
      store.manage_user(self.read_body(),actor);return self.reply(200,{'users':store.users()})
     if self.path=='/api/perfiles' and self.command=='PUT':return self.reply(200,store.save_profile(self.read_body(),actor))
+    if self.path in ('/api/respaldos/restaurar/revisar','/api/respaldos/restaurar/confirmar') and self.command=='POST':return self.reply(200,backups.review(self.read_body(),actor,apply=self.path.endswith('/confirmar')))
+    if self.path=='/api/compras/importar' and self.command=='POST':
+     write_scope(actor,'compras');return self.reply(200,purchases.run(self.read_body(),actor))
     if self.path.startswith('/api/requisiciones'):require_module(actor,'requisiciones')
     if self.path=='/api/requisiciones/cambios' and self.command=='POST':return self.reply(200,workflow.submit(self.read_body(),actor))
     decision=re.fullmatch('/api/requisiciones/cambios/([a-f0-9]{32})/resolver',self.path)
@@ -302,6 +326,7 @@ def create_handler(store):
      return self.reply(200,result)
     return self.reply(404,{'error':'No encontrado.'})
    except RequisitionConflict as e:self.reply(409,{'error':str(e)})
+   except sqlite3.IntegrityError:self.reply(400,{'error':'Datos duplicados o incompatibles. No se aplicaron los cambios.'})
    except PermissionError as e:self.reply(403,{'error':str(e)})
    except (ValueError,KeyError,TypeError) as e:self.reply(400,{'error':str(e)})
    except Exception:self.reply(500,{'error':'No se pudo guardar. Revisa el registro del servidor.'})

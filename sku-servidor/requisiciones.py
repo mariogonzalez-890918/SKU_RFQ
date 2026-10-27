@@ -21,14 +21,14 @@ def csv_bytes(rows):
  stream=io.StringIO();writer=csv.writer(stream)
  for row in rows:writer.writerow([("'"+str(x) if re.match(r'^[\s]*[=+@-]',str(x)) else str(x)) for x in row])
  return ('\ufeff'+stream.getvalue()).encode('utf8')
-def read_rows(raw,filename):
+def read_rows(raw,filename,sheet_name='PRODUCTOS'):
  if len(raw)>15*1024*1024:raise ValueError('El maestro supera 15 MB.')
  if filename.lower().endswith('.xlsx'):
   try:
    with zipfile.ZipFile(io.BytesIO(raw)) as z:
     if sum(i.file_size for i in z.infolist())>100*1024*1024:raise ValueError('El Excel descomprimido supera 100 MB.')
     wb=ET.fromstring(z.read('xl/workbook.xml'));rels=ET.fromstring(z.read('xl/_rels/workbook.xml.rels'));targets={r.get('Id'):r.get('Target') for r in rels}
-    sheet=next((s for s in wb.findall('m:sheets/m:sheet',NS) if s.get('name')=='PRODUCTOS'),None)
+    sheet=next((s for s in wb.findall('m:sheets/m:sheet',NS) if s.get('name')==sheet_name),None)
     if sheet is None:raise ValueError('El archivo debe contener la pestaña PRODUCTOS. No se importan otras hojas.')
     target=targets[sheet.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')];path=target.lstrip('/') if target.startswith('/') else 'xl/'+target.lstrip('./')
     strings=[''.join(t.text or '' for t in si.iter('{'+NS['m']+'}t')) for si in ET.fromstring(z.read('xl/sharedStrings.xml'))] if 'xl/sharedStrings.xml' in z.namelist() else []
@@ -39,7 +39,7 @@ def read_rows(raw,filename):
       col=re.sub(r'\d','',c.get('r'));kind=c.get('t');v=c.findtext('m:v','',NS)
       values[col]=strings[int(v)] if kind=='s' and v else ''.join(t.text or '' for t in c.iter('{'+NS['m']+'}t')) if kind=='inlineStr' else v
      rows.append((int(row.get('r')),values))
-    return rows,'PRODUCTOS'
+    return rows,sheet_name
   except (zipfile.BadZipFile,ET.ParseError,KeyError,IndexError) as e:raise ValueError('El maestro Excel no es válido: '+str(e))
  if not filename.lower().endswith(('.csv','.tsv','.txt')):raise ValueError('Usa XLSX con pestaña PRODUCTOS o CSV/TSV con encabezados.')
  try:content=raw.decode('utf-8-sig')
@@ -55,8 +55,8 @@ def parse_master(raw,filename):
  if header is None:raise ValueError('Faltan encabezados SKU y DESCRIPCIÓN en PRODUCTOS o en el CSV.')
  index,headers=header
  def col(*labels):return next((headers[x] for x in labels if x in headers),None)
- columns={'sku':col('SKU','SKU NUEVO','CLAVE'),'nombre':col('DESCRIPCION','ARTICULO','NOMBRE','PRODUCTO DESCRIPCION'),'unidad':col('UM ENTREGA SUCURSALES','UM ENTREGA','UNIDAD DE MEDIDA','UNIDAD','UOM','UM COMPRA','UM BASE'),'proveedor':col('PROVEEDOR PRINCIPAL','PROVEEDOR'),'categoria':col('CATEGORIA'),'estado':col('STATUS DE COMPRA','ESTADO','ESTATUS','STATUS')}
- unit_columns=[headers[label] for label in ('UM ENTREGA SUCURSALES','UM ENTREGA','UNIDAD DE MEDIDA','UNIDAD','UOM','UM COMPRA','UM BASE') if label in headers]
+ columns={'sku':col('SKU NUEVO','SKU','CLAVE'),'nombre':col('DESCRIPCION','ARTICULO','NOMBRE','PRODUCTO DESCRIPCION'),'unidad':col('UM ENTREGA','UM ENTREGA SUCURSALES','UNIDAD DE MEDIDA','UNIDAD','UOM','UM COMPRA','UM BASE'),'proveedor':col('PROVEEDOR PRINCIPAL','PROVEEDOR'),'categoria':col('CATEGORIA'),'estado':col('STATUS DE COMPRA','ESTADO','ESTATUS','STATUS')}
+ unit_columns=[headers[label] for label in ('UM ENTREGA','UM ENTREGA SUCURSALES','UNIDAD DE MEDIDA','UNIDAD','UOM','UM COMPRA','UM BASE') if label in headers]
  materials=[];occurrences=collections.Counter()
  for number,row in rows[index+1:]:
   r={k:str(row.get(c,'') or '').strip() if c is not None else '' for k,c in columns.items()}
@@ -89,6 +89,19 @@ class RequisitionStore:
    if not db.execute('SELECT 1 FROM req_masters').fetchone():
     initial=json.loads((ROOT/'initial-requisiciones.json').read_text(encoding='utf8'));report=initial['report']
     self._insert(db,report['materiales']);db.execute('INSERT INTO req_masters(filename,created_at,actor,content,report) VALUES(?,?,?,?,?)',(report['archivo'],now(),'CARGA INICIAL',initial['master'],json.dumps({k:v for k,v in report.items() if k!='materiales'},ensure_ascii=False)))
+   db.execute('CREATE TABLE IF NOT EXISTS req_report_features(key TEXT PRIMARY KEY)')
+   if not db.execute("SELECT 1 FROM req_report_features WHERE key='um-entrega-prioridad-v2'").fetchone():
+    filename,content=db.execute('SELECT filename,content FROM req_masters ORDER BY id DESC LIMIT 1').fetchone()
+    try:sources=parse_master(base64.b64decode(content),filename)['materiales']
+    except ValueError:sources=[]
+    by_name=collections.defaultdict(list)
+    for source in sources:by_name[(norm(source['nombre']),norm(source['proveedor']))].append(source)
+    for id,payload in db.execute('SELECT id,payload FROM req_materials').fetchall():
+     material=json.loads(payload);candidates=by_name.get((norm(material['nombre']),norm(material['proveedor'])),[])
+     if len(candidates)>1:candidates=[r for r in candidates if r['fila']==material.get('fila')]
+     if len(candidates)==1 and material['unidad']!=candidates[0]['unidad']:
+      material['unidad']=candidates[0]['unidad'];db.execute('UPDATE req_materials SET payload=? WHERE id=?',(json.dumps(material,ensure_ascii=False),id))
+    db.execute("INSERT INTO req_report_features VALUES('um-entrega-prioridad-v2')")
  @staticmethod
  def _insert(db,materials):
   created=0
@@ -116,7 +129,29 @@ class RequisitionStore:
   report=parse_master(raw,filename)
   if data.get('revisar',False):return {k:v for k,v in report.items() if k!='materiales'}
   with self.store.connect() as db:
-   db.execute('BEGIN IMMEDIATE');added=self._insert(db,report['materiales']);summary={k:v for k,v in report.items() if k!='materiales'};summary.update({'agregados':added,'conservados':report['total']-added})
+   db.execute('BEGIN IMMEDIATE');existing=[{'id':id,**json.loads(payload)} for id,payload in db.execute('SELECT id,payload FROM req_materials')];by_source={r['source_key']:r for r in existing};by_sku=collections.defaultdict(list);by_name=collections.defaultdict(list)
+   for r in existing:
+    if r['sku']:by_sku[norm(r['sku'])].append(r)
+    by_name[(norm(r['nombre']),norm(r['proveedor']))].append(r)
+   added=updated=skipped=0;seen=set();conflicts=[]
+   for source in report['materiales']:
+    candidates=[by_source[source['source_key']]] if source['source_key'] in by_source else by_sku.get(norm(source['sku']),[]) if source['sku'] else []
+    if len(candidates)>1:candidates=[r for r in candidates if (norm(r['nombre']),norm(r['proveedor']))==(norm(source['nombre']),norm(source['proveedor']))]
+    if not candidates:candidates=by_name.get((norm(source['nombre']),norm(source['proveedor'])),[])
+    if len(candidates)>1:
+     matching=[r for r in candidates if norm(r['unidad'])==norm(source['unidad'])]
+     if len(matching)==1:candidates=matching
+    if len(candidates)>1 or candidates and candidates[0]['id'] in seen:
+     skipped+=1;conflicts.append({'fila':source['fila'],'descripcion':source['nombre'],'motivo':'Coincidencia ambigua o fila repetida; identifica el producto con SKU.'});continue
+    old=candidates[0] if candidates else None;item={**source}
+    if old and not item['sku']:item['sku']=old['sku']
+    if old:
+     seen.add(old['id']);updated+=int(any(old.get(k)!=v for k,v in item.items()));db.execute('UPDATE req_materials SET source_key=?,payload=? WHERE id=?',(source['source_key'],json.dumps(item,ensure_ascii=False),old['id']));entry={'id':old['id'],**item}
+    else:
+     cursor=db.execute('INSERT INTO req_materials(source_key,payload) VALUES(?,?)',(source['source_key'],json.dumps(item,ensure_ascii=False)));added+=1;seen.add(cursor.lastrowid);entry={'id':cursor.lastrowid,**item}
+    by_source[source['source_key']]=entry;by_name[(norm(item['nombre']),norm(item['proveedor']))]=[entry]
+    if item['sku']:by_sku[norm(item['sku'])]=[entry]
+   summary={k:v for k,v in report.items() if k!='materiales'};summary.update({'agregados':added,'actualizados':updated,'omitidos':skipped,'conflictos':conflicts,'conservados':report['total']-added-updated-skipped})
    db.execute('INSERT INTO req_masters(filename,created_at,actor,content,report) VALUES(?,?,?,?,?)',(filename,now(),actor['email'],base64.b64encode(raw).decode(),json.dumps(summary,ensure_ascii=False)))
   return summary
  def master_file(self):

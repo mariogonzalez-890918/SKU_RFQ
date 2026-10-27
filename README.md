@@ -5,11 +5,12 @@ Aplicación para Windows y servidor local con generadores de SKU de compras y ve
 ## Funciones
 
 - SKU de 14 caracteres. Conserva los SKU históricos de ventas.
-- Carga de maestros sin sobrescribir los artículos existentes.
+- Maestro de compras desde `PRODUCTOS`: revisión previa, actualización por lote y recálculo de SKU cuando cambia la clasificación. Los SKU anteriores quedan reservados; las filas ambiguas se muestran para revisión.
 - Requisiciones con fecha del servidor y serie/folio por sucursal.
 - Roles y acceso configurable a cada módulo; almacenistas limitados a sus almacenes.
-- Reportes con filtros, unidades, costo de compra, impuestos configurables y descargas XLSX, PDF y CSV.
+- Reportes con filtros, costo por **UM_ENTREGA**, impuestos configurables y descargas XLSX, PDF y CSV. Importe = cantidad solicitada × costo por unidad de entrega; se convierte desde UM_COMPRA mediante una equivalencia válida.
 - Cambios o cancelaciones propuestos por almacenistas, con aprobación de Gerente o Superadministrador e historial. Las canceladas se excluyen del costeo.
+- Respaldo y restauración por módulo (SKU Compras, SKU Ventas o Requisiciones), exclusivos de Superadministrador, con revisión de integridad, copia automática previa y conservación de máximos de folios/identificadores.
 
 ## Ejecutar desde el código
 

@@ -39,6 +39,7 @@
 !/tools/inicializar.py
 /tests/*
 !/tests/test_public_source.py
+!/tests/test_backup_import.py
 **/__pycache__/
 *.pyc
 *.sqlite3*

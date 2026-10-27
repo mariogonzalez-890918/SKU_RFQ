@@ -13,7 +13,7 @@ def dec(value,positive=False):
  except (ValueError,decimal.InvalidOperation,TypeError):raise ValueError('Importe o equivalencia inválidos.')
 def money(value):return str(value.quantize(CENT,rounding=decimal.ROUND_HALF_UP))
 def unit(value):
- n=norm(value);aliases={'PIEZAS':'PIEZA','PZA':'PIEZA','PZAS':'PIEZA','PZS':'PIEZA','KG':'KILOGRAMO','KGS':'KILOGRAMO','KILOGRAMOS':'KILOGRAMO','LT':'LITRO','LTS':'LITRO','LITROS':'LITRO','GR':'GRAMO','GRS':'GRAMO','GRAMOS':'GRAMO','ML':'MILILITRO','MILILITROS':'MILILITRO','PAQ':'PAQUETE','BOLSAS':'BOLSA'}
+ n=norm(value);aliases={'PIEZAS':'PIEZA','PZA':'PIEZA','PZAS':'PIEZA','PZS':'PIEZA','KG':'KILOGRAMO','KGS':'KILOGRAMO','KILO':'KILOGRAMO','KILOS':'KILOGRAMO','KILOGRAMOS':'KILOGRAMO','LT':'LITRO','LTS':'LITRO','LITROS':'LITRO','GR':'GRAMO','GRS':'GRAMO','GRAMOS':'GRAMO','ML':'MILILITRO','MILILITROS':'MILILITRO','PAQ':'PAQUETE','BOLSAS':'BOLSA'}
  return aliases.get(n,n)
 def dimension(value):
  u=unit(value);simple={'KILOGRAMO':('masa',D(1000)),'GRAMO':('masa',D(1)),'LITRO':('volumen',D(1000)),'MILILITRO':('volumen',D(1)),'PIEZA':('pieza',D(1)),'MILLAR':('pieza',D(1000))}
@@ -29,6 +29,7 @@ def dimension(value):
  return (dim[0],amount*dim[1]) if dim and amount>0 else None
 def infer_factor(material):
  purchase=material.get('unidadCompra','');requested=material.get('unidad','')
+ if str(material.get('factorMaestro','')).strip() in ('0','0.0','0.00'):return None,'Equivalencia U_M en cero; pendiente de corregir.'
  if not purchase or not requested:return None,'Falta unidad de compra o entrega.'
  if unit(purchase)==unit(requested):return '1','Misma unidad de compra y solicitud.'
  if unit(requested) in {'CAJA','BOLSA','BULTO','BOTE','CUBETA','PAQUETE','PIEZA','GALON','BOTELLA','BIDON','PORRON'} and norm(purchase).startswith(unit(requested)+' '):return '1','Misma presentación del producto.'
@@ -65,6 +66,10 @@ class ReportStore:
    if not db.execute('SELECT 1 FROM req_reports').fetchone():
     config={'id':'general','nombre':'Reporte general de requisiciones','desde':'','hasta':'','sucursales':[],'areas':[],'solicitante':'','material':'','folios':'','agrupacion':'sucursal','impuestos':[],'actualizado':now(),'editor':'CARGA INICIAL'}
     db.execute('INSERT INTO req_reports VALUES(?,1,?)',('general',json.dumps(config,ensure_ascii=False)))
+   needs_units=not db.execute("SELECT 1 FROM req_report_features WHERE key='costos-um-entrega-v2'").fetchone()
+  if needs_units:
+   self.sync_import(None)
+   with store.connect() as db:db.execute("INSERT OR IGNORE INTO req_report_features VALUES('costos-um-entrega-v2')")
  @staticmethod
  def from_material(material,origin):
   factor,reason=infer_factor(material)
@@ -72,13 +77,30 @@ class ReportStore:
  def sync_import(self,actor):
   # Nuevos materiales reciben costo inicial; solo editores pueden cambiar el costo de referencias existentes.
   materials={r['source_key']:r for r in self.requisitions.materials()}
-  name,raw=self.requisitions.master_file();parsed=parse_master(raw,name)
+  by_name=collections.defaultdict(list)
+  for r in materials.values():by_name[(norm(r['nombre']),norm(r['proveedor']))].append(r)
+  name,raw=self.requisitions.master_file()
+  try:parsed=parse_master(raw,name)
+  except ValueError:
+   if not materials:return
+   raise
   with self.store.connect() as db:
    for source in parsed['materiales']:
     material=materials.get(source['source_key'])
+    if material is None:
+     candidates=by_name.get((norm(source['nombre']),norm(source['proveedor'])),[])
+     if len(candidates)>1:candidates=[r for r in candidates if r.get('fila')==source.get('fila')]
+     material=candidates[0] if len(candidates)==1 else None
     if not material or source.get('precioCompra','')=='':continue
-    if db.execute('SELECT 1 FROM req_costs WHERE material_id=?',(material['id'],)).fetchone():continue
-    config=self.from_material({**material,**source},'Maestro: '+name);db.execute('INSERT INTO req_costs VALUES(?,1,?)',(material['id'],json.dumps(config,ensure_ascii=False)))
+    previous=db.execute('SELECT revision,payload FROM req_costs WHERE material_id=?',(material['id'],)).fetchone()
+    config=self.from_material({**material,**source},'Maestro: '+name)
+    if previous:
+     old=json.loads(previous[1])
+     if old.get('origen')=='Configuración del reporte':
+      if old['unidadSolicitud']==material['unidad']:continue
+      config={**old,'unidadSolicitud':material['unidad'],'factor':None,'motivo':'Cambió UM_ENTREGA; confirma de nuevo la equivalencia manual.','actualizado':now()}
+     db.execute('UPDATE req_costs SET revision=?,payload=? WHERE material_id=?',(previous[0]+1,json.dumps(config,ensure_ascii=False),material['id']))
+    else:db.execute('INSERT INTO req_costs VALUES(?,1,?)',(material['id'],json.dumps(config,ensure_ascii=False)))
  def costs(self):
   with self.store.connect() as db:configs={id:{**json.loads(payload),'revision':rev} for id,rev,payload in db.execute('SELECT material_id,revision,payload FROM req_costs')}
   result=[]
@@ -176,12 +198,17 @@ class ReportStore:
    for index,line in enumerate(doc['partidas']):
     if c['material'] and norm(c['material']) not in norm(line['nombre']+' '+line['sku']):continue
     if len(details)>=100000:raise ValueError('El reporte supera 100,000 partidas. Reduce los filtros.')
-    cost=costs.get(line['materialId']);value=None;reason='Falta costo de compra o equivalencia.'
+    cost=costs.get(line['materialId']);value=None;factor_line=None;reason='Falta costo de compra o equivalencia.'
     if cost and cost['costoUnitario'] is not None:
-     if unit(cost['unidadSolicitud'])==unit(line['unidad']):value=D(cost['costoUnitario']);reason=''
-     else:reason='La unidad de la requisición no coincide con la equivalencia del reporte.'
+     if unit(cost['unidadSolicitud'])==unit(line['unidad']):factor_line=dec(cost['factor'],True)
+     elif unit(cost['unidadCompra'])==unit(line['unidad']):factor_line=D(1)
+     else:
+      current=dimension(cost['unidadSolicitud']);previous=dimension(line['unidad'])
+      if current and previous and current[0]==previous[0]:factor_line=dec(cost['factor'],True)*current[1]/previous[1]
+     if factor_line is not None:value=dec(cost['precioCompra'])/factor_line;reason=''
+     else:reason='La unidad histórica de la requisición requiere confirmar su equivalencia.'
     elif cost:reason=cost['motivo']
-    quantity=dec(line['cantidad'],True);base=(quantity*dec(cost['precioCompra'])/dec(cost['factor'],True)).quantize(CENT,rounding=decimal.ROUND_HALF_UP) if value is not None else None
+    quantity=dec(line['cantidad'],True);base=(quantity*dec(cost['precioCompra'])/factor_line).quantize(CENT,rounding=decimal.ROUND_HALF_UP) if value is not None else None
     tax_values=[{'nombre':t['nombre'],'tasa':t['tasa'],'importe':money(base*dec(t['tasa'])/100) if base is not None else None} for t in c['impuestos']]
     tax=sum((D(t['importe']) for t in tax_values),D(0)) if base is not None else None;total=base+tax if base is not None else None
     detail={'requisicionId':doc['id'],'folio':doc['numero'],'fecha':doc['fecha'],'sucursal':doc['sucursal'],'area':doc['area'],'solicitante':doc['solicitante'],'materialId':line['materialId'],'sku':line['sku'],'descripcion':line['nombre'],'cantidad':line['cantidad'],'unidad':line['unidad'],'costoUnitario':format(value,'f') if value is not None else None,'costoCompra':money(base) if base is not None else None,'impuestos':tax_values,'importeImpuestos':money(tax) if tax is not None else None,'total':money(total) if total is not None else None,'pendiente':reason,'origenCosto':cost['origen'] if cost else 'Sin costo'}
