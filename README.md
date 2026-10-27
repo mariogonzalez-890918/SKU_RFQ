@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.2.0
+# RFQ_SKU_GMP · Versión 1.2.1
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -6,7 +6,7 @@ aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan
 
 ## Imágenes y navegación
 
-Las opciones de cada módulo se eligen en submenús del menú izquierdo. Reportes separa consulta, configuración y costos; Respaldos separa descarga, restauración y reinicio.
+Las opciones de cada módulo se eligen en submenús del menú izquierdo. En celular y tablet (hasta 1024 px), el botón de tres líneas abre el menú desplegable; se conserva abierto cuando cambia la altura visible del navegador. Reportes separa consulta, configuración y costos; Respaldos separa descarga, restauración y reinicio.
 
 En Requisiciones → Imágenes por SKU puedes cargar PNG de mínimo 225 × 165 px y máximo 2 MB por archivo. Para cargar varios, nombra cada archivo como `SKU.png`; los SKU deben existir y ser únicos. Para carga individual usa el buscador o filtra **Sin imagen** y pulsa **Cargar imagen**. La carga masiva conserva fotos existentes salvo que actives reemplazar. Superadministrador, Compras y Alta de productos pueden administrar imágenes con acceso al módulo. Las fotos solo aparecen en la búsqueda de materiales de una nueva requisición; si faltan, se muestra el logo GMP. El respaldo de requisiciones incluye imágenes y acepta respaldos anteriores sin fotos.
 

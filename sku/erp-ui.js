@@ -68,9 +68,20 @@ const gmpHistoryOriginal=rqHistory;rqHistory=async function(){await gmpHistoryOr
 const gmpChangesOriginal=rwLoad;rwLoad=async function(){await gmpChangesOriginal();for(const row of $('rwTabla').rows){const cell=row.cells[0],parts=cell.textContent.split(' · '),status=parts.pop(),stamp=parts.join(' · ');const date=document.createElement('small');date.textContent=stamp;date.className='gmp-status-date';gmpStatusCell(cell,status);cell.prepend(date);}};
 // Los maestros y la ayuda no compiten visualmente con la acción principal.
 for(const id of ['excel','ventasActualizar','rqActualizar']){const actions=$(id).closest('.actions');if(actions){actions.classList.add('gmp-section-tools');}}
-function gmpCloseMenu(){document.body.classList.remove('gmp-menu-open');$('gmpShade').hidden=true;$('gmpSidebar').inert=window.innerWidth<=800;$('gmpMenuToggle').setAttribute('aria-expanded',String(window.innerWidth>800&&!document.body.classList.contains('gmp-compact')));}
-$('gmpMenuToggle').onclick=()=>{if(window.innerWidth<=800){const open=document.body.classList.toggle('gmp-menu-open');$('gmpShade').hidden=!open;$('gmpSidebar').inert=!open;$('gmpMenuToggle').setAttribute('aria-expanded',String(open));}else{document.body.classList.toggle('gmp-compact');$('gmpMenuToggle').setAttribute('aria-expanded',String(!document.body.classList.contains('gmp-compact')));}};
-$('gmpShade').onclick=gmpCloseMenu;document.addEventListener('keydown',e=>{if(e.key==='Escape')gmpCloseMenu();});window.addEventListener('resize',()=>{if(window.innerWidth<=800)document.body.classList.remove('gmp-compact');gmpCloseMenu();});gmpCloseMenu();
+// La media query coincide con CSS; los cambios de altura del navegador no cierran el menú.
+const gmpMobileNav=window.matchMedia('(max-width: 1024px)');
+function gmpSetMenu(open=false){
+ const mobile=gmpMobileNav.matches,expanded=mobile&&open;
+ document.body.classList.toggle('gmp-menu-open',expanded);
+ $('gmpShade').hidden=!expanded;$('gmpSidebar').inert=mobile&&!expanded;
+ $('gmpMenuToggle').setAttribute('aria-expanded',String(mobile?expanded:!document.body.classList.contains('gmp-compact')));
+ $('gmpMenuClose').hidden=!mobile;
+}
+function gmpCloseMenu(){gmpSetMenu(false);}
+$('gmpMenuToggle').onclick=()=>{if(gmpMobileNav.matches){document.body.classList.remove('gmp-compact');gmpSetMenu(!document.body.classList.contains('gmp-menu-open'));}else{document.body.classList.toggle('gmp-compact');gmpSetMenu();}};
+$('gmpMenuClose').onclick=()=>{gmpCloseMenu();$('gmpMenuToggle').focus({preventScroll:true});};
+$('gmpShade').onclick=gmpCloseMenu;document.addEventListener('keydown',e=>{if(e.key==='Escape')gmpCloseMenu();});
+gmpMobileNav.addEventListener('change',()=>{document.body.classList.remove('gmp-compact');gmpCloseMenu();});gmpCloseMenu();
 function gmpNavigate(route,sub){if(!gmpAllowed[route])route='inicio';const value=route+(sub?'/'+sub:'');if(location.hash.slice(1)===value)void gmpRenderRoute();else location.hash=value;}
 async function gmpRenderRoute(){
  const generation=++gmpNavGeneration;let [route,sub]=location.hash.slice(1).split('/');if(!gmpAllowed[route]){route='inicio';history.replaceState(null,'','#inicio');}gmpActive=route;
