@@ -13,6 +13,19 @@ def workbook(master):
   with zipfile.ZipFile(io.BytesIO(raw)) as z:check('xl/workbook.xml' in z.namelist() and sum(i.file_size for i in z.infolist())<=100*1024*1024,'Maestro Excel inválido o demasiado grande.')
  except (TypeError,zipfile.BadZipFile):raise ValueError('Maestro Excel inválido.')
 
+def blank_master(sheet):
+ from xml.sax.saxutils import escape
+ headers={'A':'CLAVE PROVEEDOR','B':'SKU','C':'STATUS DE COMPRA','D':'SKU NUEVO','E':'PRODUCTO','F':'CATEGORÍA','G':'SUBCATEGORÍA','H':'DESCRIPCIÓN','I':'PRECIO DE COMPRA','K':'COSTO','L':'U_M','M':'UM_COMPRA','N':'UM_ENTREGA','O':'PROVEEDOR PRINCIPAL'}
+ if sheet=='SUGERIDO':headers={**headers,'A':'SKU','B':'PRODUCTOS Y SERVICIOS','C':'CATEGORÍA','D':'SUBCATEGORÍA','F':'MODULO ID PDV','S':'ESTADO'}
+ ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';out=io.BytesIO()
+ with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+  z.writestr('[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
+  z.writestr('_rels/.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+  z.writestr('xl/workbook.xml','<workbook xmlns="'+ns+'" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+sheet+'" sheetId="1" r:id="rId1"/></sheets></workbook>')
+  z.writestr('xl/_rels/workbook.xml.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+  row=''.join('<c r="'+col+'1" t="inlineStr"><is><t>'+escape(value)+'</t></is></c>' for col,value in headers.items());z.writestr('xl/worksheets/sheet1.xml','<worksheet xmlns="'+ns+'"><sheetData><row r="1">'+row+'</row></sheetData></worksheet>')
+ return base64.b64encode(out.getvalue()).decode()
+
 class BackupStore:
  def __init__(self,store,validate_purchase,reports):self.store=store;self.validate_purchase=validate_purchase;self.reports=reports
  def authorize(self,actor,module):
@@ -48,7 +61,8 @@ class BackupStore:
     from ventas import validate
     validate(catalog)
    workbook(catalog['master']);return
-  tables=data.get('tablas');check(isinstance(tables,dict) and set(tables)==set(TABLES),'El respaldo de requisiciones debe incluir maestro, solicitudes, series, costos, reportes y autorizaciones.')
+  tables=data.get('tablas')
+  check(isinstance(tables,dict) and set(tables)==set(TABLES),'El respaldo de requisiciones debe incluir maestro, solicitudes, series, costos, reportes y autorizaciones.')
   unpacked={}
   for table in TABLES:
    value=tables[table];columns=[r[1] for r in db.execute('PRAGMA table_info('+table+')')];check(isinstance(value,dict) and value.get('columnas')==columns and isinstance(value.get('filas'),list),'Estructura incompatible: '+table)
@@ -89,6 +103,7 @@ class BackupStore:
   for row in unpacked['req_costs']:
    c=json.loads(row['payload']);check(row['material_id'] in materials and type(row['revision']) is int and row['revision']>=1 and all(isinstance(c.get(k),str) for k in ('unidadCompra','unidadSolicitud','motivo','origen','actualizado')),'Costo sin material o estructura válida.')
    if c.get('precioCompra') not in ('',None):dec(c['precioCompra'])
+   if c.get('costoEntrega') not in ('',None):dec(c['costoEntrega'])
    if c.get('factor') is not None:dec(c['factor'])
   for row in unpacked['req_reports']:
    c=json.loads(row['payload']);check(c.get('id')==row['id'] and re.fullmatch('[A-Za-z0-9_-]{1,64}',row['id']) and type(row['revision']) is int and row['revision']>=1,'Reporte inválido.');self.reports.config(c)
@@ -133,3 +148,28 @@ class BackupStore:
   return result
  def previous(self,id,actor):
   self.authorize(actor,'compras');check(bool(re.fullmatch('[a-f0-9]{32}',id)),'Identificador inválido.');path=self.store.directory/'respaldos'/('antes-'+id+'.json');check(path.is_file(),'No se encuentra la copia de seguridad previa.');return path.read_bytes()
+ def reset(self,data,actor,apply=False):
+  module=data.get('modulo');self.authorize(actor,module)
+  with self.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);fingerprint=digest(current);result={'modulo':module,'nombre':MODULES[module],'actual':self.summary(module,current),'huellaActual':fingerprint,'nota':'Se vacían los datos del módulo elegido. Usuarios, otros módulos y máximos de consecutivos/folios se conservan. Se crea una copia automática antes de vaciar.'}
+   if not apply:return result
+   check(data.get('confirmar') is True and data.get('texto')=='VACIAR','Escribe VACIAR para confirmar el reinicio del módulo.')
+   if data.get('huellaActual')!=fingerprint:raise Conflict('El módulo cambió; vuelve a revisar antes de vaciar.')
+   id=uuid.uuid4().hex;folder=self.store.directory/'respaldos';folder.mkdir(exist_ok=True);(folder/('antes-'+id+'.json')).write_text(json.dumps(self.envelope(module,current,actor),ensure_ascii=False),encoding='utf8')
+   if module in ('compras','ventas'):
+    table='catalog' if module=='compras' else 'sales_catalog';history='history' if module=='compras' else 'sales_history';catalog=current['catalogo'];old=json.dumps(catalog,ensure_ascii=False);state=catalog['state'];state['reservados']=sorted(set(state['reservados'])|{r['sku'] for r in state['registros'] if r.get('sku')});state['registros']=[];catalog['master']=blank_master('PRODUCTOS' if module=='compras' else 'SUGERIDO')
+    if module=='compras':catalog.update({'formatoMaestro':'PRODUCTOS','archivoMaestro':'CATALOGO VACIO.xlsx'})
+    else:
+     from ventas import row_identity
+     catalog['sheet']='SUGERIDO';catalog['historicosReinicio']={**catalog.get('historicosReinicio',{}),**{r['sku']:list(row_identity(r)) for r in json.loads(old)['state']['registros'] if r.get('validado') and not r['eliminado']}}
+    db.execute('INSERT INTO '+history+' VALUES(?,?,?)',(current['revision'],now(),old));db.execute('UPDATE '+table+' SET revision=?,payload=? WHERE id=1',(current['revision']+1,json.dumps(catalog,ensure_ascii=False)))
+   else:
+    for table in TABLES:
+     if table not in ('req_branches','req_series_registry'):db.execute('DELETE FROM '+table)
+    db.execute('UPDATE req_branches SET revision=revision+1')
+    report={'archivo':'PRODUCTOS VACIO.xlsx','hoja':'PRODUCTOS','total':0,'sinSku':0,'sinUnidad':0,'skuRepetidos':0,'inactivos':0};db.execute('INSERT INTO req_masters(filename,created_at,actor,content,report) VALUES(?,?,?,?,?)',(report['archivo'],now(),actor['email'],blank_master('PRODUCTOS'),json.dumps(report)))
+    config=self.reports.config({'nombre':'Reporte general de requisiciones'});config.update({'id':'general','editor':actor['email'],'actualizado':now()});db.execute('INSERT INTO req_reports VALUES(?,1,?)',('general',json.dumps(config,ensure_ascii=False)))
+    for key in ('costos-compra-v1','um-entrega-prioridad-v2','costos-um-entrega-v2','costos-um-entrega-v3-costo'):db.execute('INSERT INTO req_report_features VALUES(?)',(key,))
+   result.update({'ok':True,'respaldoPrevio':id})
+  return result
+

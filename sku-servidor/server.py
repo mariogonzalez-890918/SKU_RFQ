@@ -11,6 +11,7 @@ from reporte_export import report_xlsx,report_pdf
 from autorizaciones import WorkflowStore
 from compras import PurchaseImporter,export_products
 from respaldos import BackupStore
+from app_info import TITLE,VERSION,SUPPORT_LINE
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
@@ -27,7 +28,7 @@ def new_password(password):
  salt=secrets.token_hex(16);return salt,password_hash(password,salt)
 def norm(value):
  return ' '.join(''.join(c for c in unicodedata.normalize('NFD',str(value or '')) if not unicodedata.combining(c)).upper().split())
-def identity(r):return tuple(norm(r.get(k,'')) for k in ('tipo','categoria','subcategoria','nombre','proveedor'))
+def identity(r):return tuple(norm(r.get(k,'')) for k in ('tipo','categoria','subcategoria','nombre','proveedor','claveProveedor','unidadCompra','unidadEntrega'))
 def sku(r):
  body=r['tipo']+r['categoria']+r['subcategoria']+str(r['id']).zfill(7)
  total=0;factor=2
@@ -215,7 +216,7 @@ def create_handler(store):
    if path in ('/','/index.html'):
     name='index.html' if actor else 'login.html';return self.reply(200,(ROOT/'public'/name).read_bytes(),'text/html; charset=utf-8')
    if not actor:return self.reply(401,{'error':'Inicia sesión para continuar.'})
-   if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES})
+   if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES,'app':{'titulo':TITLE,'version':VERSION,'soporte':SUPPORT_LINE}})
    if path.startswith('/api/respaldos'):
     try:
      previous=re.fullmatch('/api/respaldos/previo/([a-f0-9]{32})',path)
@@ -305,6 +306,7 @@ def create_handler(store):
      store.manage_user(self.read_body(),actor);return self.reply(200,{'users':store.users()})
     if self.path=='/api/perfiles' and self.command=='PUT':return self.reply(200,store.save_profile(self.read_body(),actor))
     if self.path in ('/api/respaldos/restaurar/revisar','/api/respaldos/restaurar/confirmar') and self.command=='POST':return self.reply(200,backups.review(self.read_body(),actor,apply=self.path.endswith('/confirmar')))
+    if self.path in ('/api/respaldos/vaciar/revisar','/api/respaldos/vaciar/confirmar') and self.command=='POST':return self.reply(200,backups.reset(self.read_body(),actor,apply=self.path.endswith('/confirmar')))
     if self.path=='/api/compras/importar' and self.command=='POST':
      write_scope(actor,'compras');return self.reply(200,purchases.run(self.read_body(),actor))
     if self.path.startswith('/api/requisiciones'):require_module(actor,'requisiciones')
@@ -352,8 +354,9 @@ def main():
   config={k:v for k,v in config.items() if k not in ('password','user')};configpath.write_text(json.dumps(config,indent=2),encoding='utf8')
  port=args.port or config.get('port',8080);store=Store(args.data_dir)
  server=http.server.ThreadingHTTPServer((args.host,port),create_handler(store));server.daemon_threads=True
- print(f'\nGENERADOR DE SKU GMP\nPuerto: {port}\nLocal: http://127.0.0.1:{port}\nRed/VPN: http://IP-DEL-SERVIDOR:{port}\nSuperadministrador: {ADMIN_EMAIL}\nInicia sesión con la contraseña configurada.\nDatos: {store.path}\nCtrl+C para detener.\n',flush=True)
+ print(f'\n{TITLE} v{VERSION}\n{SUPPORT_LINE}\nPuerto: {port}\nLocal: http://127.0.0.1:{port}\nRed/VPN: http://IP-DEL-SERVIDOR:{port}\nSuperadministrador: {ADMIN_EMAIL}\nInicia sesión con la contraseña configurada.\nDatos: {store.path}\nCtrl+C para detener.\n',flush=True)
  try:server.serve_forever()
  except KeyboardInterrupt:pass
  finally:server.server_close()
 if __name__=='__main__':main()
+

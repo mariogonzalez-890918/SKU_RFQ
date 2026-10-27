@@ -15,7 +15,7 @@ def parse_products(raw,filename,catalogs):
   if 'DESCRIPCION' in names or 'ARTICULO' in names:headers=names;break
  if headers is None:raise ValueError('Falta DESCRIPCIÓN en la pestaña PRODUCTOS.')
  def col(*labels):return next((headers[label] for label in labels if label in headers),None)
- columns={'nombre':col('DESCRIPCION','ARTICULO','NOMBRE'),'proveedor':col('PROVEEDOR PRINCIPAL','PROVEEDOR'),'skuFuente':col('SKU NUEVO','SKU','CLAVE'),'anteriorFuente':col('SKU ANTIGUO','SKU ANTERIOR'),'estado':col('STATUS DE COMPRA','ESTADO','ESTATUS'),'tipo':col('PRODUCTO','TIPO DE PRODUCTO'),'categoria':col('CATEGORIA'),'subcategoria':col('SUBCATEGORIA')}
+ columns={'nombre':col('DESCRIPCION','ARTICULO','NOMBRE'),'proveedor':col('PROVEEDOR PRINCIPAL','PROVEEDOR'),'skuFuente':col('SKU NUEVO','SKU','CLAVE'),'anteriorFuente':col('SKU ANTIGUO','SKU ANTERIOR'),'estado':col('STATUS DE COMPRA','ESTADO','ESTATUS'),'tipo':col('PRODUCTO','TIPO DE PRODUCTO'),'categoria':col('CATEGORIA'),'subcategoria':col('SUBCATEGORIA'),'claveProveedor':col('CLAVE PROVEEDOR'),'unidadCompra':col('UOM COMPRA','UM COMPRA'),'unidadEntrega':col('UOM ENTREGA','UM ENTREGA')}
  result=[]
  for number,row in rows[index+1:]:
   item={key:str(row.get(c,'') or '').strip() if c else '' for key,c in columns.items()}
@@ -40,6 +40,7 @@ class PurchaseImporter:
   try:raw=base64.b64decode(data.get('contenido',''),validate=True)
   except Exception:raise ValueError('Archivo inválido.')
   incoming=parse_products(raw,filename,self.store.catalogs)
+  legacy_counts=collections.Counter(norm(item['anteriorFuente']) for item in incoming if item['anteriorFuente'])
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');revision,payload=db.execute('SELECT revision,payload FROM catalog WHERE id=1').fetchone()
    if data.get('revision')!=revision:raise Conflict('El catálogo cambió. Actualiza y vuelve a revisar el archivo.')
@@ -53,15 +54,19 @@ class PurchaseImporter:
    summary={'hoja':'PRODUCTOS','total':len(incoming),'agregados':0,'actualizados':0,'sinCambios':0,'skuActualizados':0,'omitidos':0,'conflictos':[]};changes=[];seen=set();before_changes={};source_rows={}
    for item in incoming:
     candidates=by_code.get(norm(item['skuFuente']),[]) if item['skuFuente'] else []
-    if not candidates and item['anteriorFuente']:candidates=by_code.get(norm(item['anteriorFuente']),[])
+    if not candidates and item['anteriorFuente'] and legacy_counts[norm(item['anteriorFuente'])]==1:candidates=by_code.get(norm(item['anteriorFuente']),[])
     if not candidates:candidates=by_name.get((norm(item['nombre']),norm(item['proveedor'])),[])
     candidates=list({r['id']:r for r in candidates}.values())
+    if candidates and not item['skuFuente']:
+     keys=('claveProveedor','unidadCompra','unidadEntrega');exact=[r for r in candidates if all(norm(item[key])==norm(r.get(key,'')) for key in keys)]
+     candidates=exact if exact else [r for r in candidates if all(not item[key] or key not in r or norm(item[key])==norm(r[key]) for key in keys)]
     if len(candidates)>1:
      filtered=[r for r in candidates if all(not code or r[key]==code for key,code in item['clasificacion'].items())]
      if len(filtered)==1:candidates=filtered
     if len(candidates)>1:
      summary['omitidos']+=1;summary['conflictos'].append({'fila':item['filaFuente'],'descripcion':item['nombre'],'motivo':'Coinciden varios productos; completa clasificación o SKU para identificarlo.'});continue
     r=candidates[0] if candidates else None
+    if r and r['id'] in seen and not item['skuFuente'] and any(code and code!=r[key] for key,code in item['clasificacion'].items()):r=None
     if r and (r['id'] in seen or r['eliminado']):
      summary['omitidos']+=1;summary['conflictos'].append({'fila':item['filaFuente'],'descripcion':item['nombre'],'motivo':'Fila repetida o producto dado de baja; no se reactiva.'});continue
     before=copy.deepcopy(r) if r else None
@@ -72,13 +77,13 @@ class PurchaseImporter:
     before_changes[r['id']]=before;source_rows[r['id']]=item
     for key,code in item['clasificacion'].items():
      if code:r[key]=code
-    r.update({'nombre':item['nombre'],'proveedor':item['proveedor'],'estado':item['estado'] or r.get('estado','ACTIVO'),'camposExcel':item['camposExcel'],'editado':True})
+    r.update({'nombre':item['nombre'],'proveedor':item['proveedor'],'estado':item['estado'] or r.get('estado','ACTIVO'),'camposExcel':item['camposExcel'],'editado':True,**{key:item[key] for key in ('claveProveedor','unidadCompra','unidadEntrega')}})
     new_sku=self.make_sku(r)
     if before and before['sku']!=new_sku:
      state['reservados'].append(before['sku']);summary['skuActualizados']+=1;changes.append({'id':r['id'],'descripcion':r['nombre'],'anterior':before['sku'],'nuevo':new_sku})
     r['sku']=new_sku
     if before:
-     relevant=('nombre','proveedor','estado','tipo','categoria','subcategoria','sku','camposExcel')
+     relevant=('nombre','proveedor','estado','tipo','categoria','subcategoria','sku','camposExcel','claveProveedor','unidadCompra','unidadEntrega')
      if any(before.get(k)!=r.get(k) for k in relevant):summary['actualizados']+=1
      else:summary['sinCambios']+=1
     for key in (new_sku,r.get('anterior','')):
@@ -86,7 +91,7 @@ class PurchaseImporter:
     if before:
      old_key=(norm(before['nombre']),norm(before.get('proveedor','')));by_name[old_key]=[x for x in by_name[old_key] if x['id']!=r['id']]
     new_key=(norm(r['nombre']),norm(r['proveedor']));by_name[new_key]=[x for x in by_name[new_key] if x['id']!=r['id']]+[r]
-   def fingerprint(r):return tuple(norm(r.get(k,'')) for k in ('tipo','categoria','subcategoria','nombre','proveedor'))
+   def fingerprint(r):return tuple(norm(r.get(k,'')) for k in ('tipo','categoria','subcategoria','nombre','proveedor','claveProveedor','unidadCompra','unidadEntrega'))
    groups=collections.defaultdict(list)
    for r in state['registros']:
     if not r['eliminado']:groups[fingerprint(r)].append(r)

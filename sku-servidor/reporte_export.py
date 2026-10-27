@@ -1,10 +1,11 @@
 """Descargas de reportes; las cifras y permisos se calculan siempre en el servidor."""
 import decimal,html,io,json,re,zipfile
+from app_info import TITLE,VERSION,SUPPORT_LINE
 from xml.sax.saxutils import escape
 
 def _metadata(r):
  c=r['configuracion'];s=r['resumen']
- return [['GENERADOR DE SKU GMP',c['nombre']],['Generado',r['generado']],['Alcance autorizado',', '.join(r['alcance']) or 'Sin coincidencias'],['Desde / hasta',(c.get('desde') or 'Sin inicio')+' / '+(c.get('hasta') or 'Sin fin')],['Áreas',', '.join(c.get('areas',[])) or 'Todas'],['Solicitante contiene',c.get('solicitante','')],['Material / SKU contiene',c.get('material','')],['Folio contiene',c.get('folios','')],['Base de valuación',r['baseValuacion']],['Impuestos',', '.join(t['nombre']+' '+t['tasa']+'%' for t in c['impuestos']) or 'Sin impuestos adicionales'],['Requisiciones',s['requisiciones']],['Partidas',s['partidas']],['Canceladas excluidas',s.get('canceladasExcluidas',0)],['Partidas pendientes de costo',s['pendientes']],['Costo de compra valorizado',decimal.Decimal(s['base'])],['Impuestos valorizados',decimal.Decimal(s['impuestos'])],['Total valorizado'+(' PARCIAL' if s['pendientes'] else ''),decimal.Decimal(s['total'])]]
+ return [[TITLE+' v'+VERSION,c['nombre']],['Versión',VERSION],['Soporte',SUPPORT_LINE],['Generado',r['generado']],['Alcance autorizado',', '.join(r['alcance']) or 'Sin coincidencias'],['Desde / hasta',(c.get('desde') or 'Sin inicio')+' / '+(c.get('hasta') or 'Sin fin')],['Áreas',', '.join(c.get('areas',[])) or 'Todas'],['Solicitante contiene',c.get('solicitante','')],['Material / SKU contiene',c.get('material','')],['Folio contiene',c.get('folios','')],['Base de valuación',r['baseValuacion']],['Impuestos',', '.join(t['nombre']+' '+t['tasa']+'%' for t in c['impuestos']) or 'Sin impuestos adicionales'],['Requisiciones',s['requisiciones']],['Partidas',s['partidas']],['Canceladas excluidas',s.get('canceladasExcluidas',0)],['Partidas pendientes de costo',s['pendientes']],['Costo de compra valorizado',decimal.Decimal(s['base'])],['Impuestos valorizados',decimal.Decimal(s['impuestos'])],['Total valorizado'+(' PARCIAL' if s['pendientes'] else ''),decimal.Decimal(s['total'])]]
 
 def _number(value):return decimal.Decimal(value) if value is not None else None
 
@@ -59,8 +60,8 @@ def report_pdf(r):
   t=LongTable([[p(v,white if n==0 else small) for v in row] for n,row in enumerate(rows)],colWidths=widths,repeatRows=1,hAlign='LEFT')
   t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#284e42')),('VALIGN',(0,0),(-1,-1),'TOP'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f3f4ef')]),('LINEBELOW',(0,0),(-1,0),.6,colors.HexColor('#284e42')),('BOTTOMPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),6),('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5)]))
   return t
- width=page[0]-50;story=[p('GENERADOR DE SKU GMP',heading),p(r['configuracion']['nombre'],heading)]
- for key,value in _metadata(r)[1:10]:story.append(p(key+': '+str(value),normal))
+ width=page[0]-50;story=[p(TITLE+' v'+VERSION,heading),p(r['configuracion']['nombre'],heading)]
+ for key,value in _metadata(r)[1:-7]:story.append(p(key+': '+str(value),normal))
  s=r['resumen'];story.extend([p('Requisiciones: '+str(s['requisiciones'])+' · Partidas: '+str(s['partidas'])+' · Canceladas excluidas: '+str(s.get('canceladasExcluidas',0)),normal),p(('TOTAL PARCIAL · ' if s['pendientes'] else '')+'Costo compra: '+fmt(s['base'])+' · Impuestos: '+fmt(s['impuestos'])+' · Total valorizado: '+fmt(s['total']),normal),p('Partidas pendientes de costo o equivalencia: '+str(s['pendientes'])+'. No se consideran costo cero.',normal),Spacer(1,10)])
  groups=[['Grupo','Cantidad / unidad','Solicitudes','Costo compra','Impuestos','Total','Pendientes']]+[[g['grupo'],(g['cantidad']+' '+g['unidad']) if g['cantidad'] is not None else '—',g['requisiciones'],fmt(g['base']),fmt(g['impuestos']),fmt(g['total']),g['pendientes']] for g in r['grupos']]
  story.append(table(groups,[width*x for x in (.30,.16,.09,.13,.11,.13,.08)]))
@@ -75,3 +76,4 @@ def report_pdf(r):
  def footer(canvas,document):
   canvas.saveState();canvas.setFont('Helvetica',8);canvas.setFillColor(colors.HexColor('#555555'));canvas.drawString(25,16,'GMP · '+r['generado']+' · Canceladas excluidas del costeo');canvas.drawRightString(page[0]-25,16,'Página '+str(document.page));canvas.restoreState()
  doc.build(story,onFirstPage=footer,onLaterPages=footer);return out.getvalue()
+

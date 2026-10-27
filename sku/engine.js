@@ -10,7 +10,7 @@ const alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 function checkDigit(body){let sum=0,factor=2;for(let i=body.length-1;i>=0;i--){const v=alphabet.indexOf(body[i]);if(v<0)throw Error('Caracter inválido para el verificador.');const x=v*factor;sum+=Math.floor(x/36)+x%36;factor=factor===2?1:2;}return alphabet[(36-sum%36)%36];}
 function makeSKU(r){if(!r.tipo||!r.categoria||!r.subcategoria)return '';if(!Number.isSafeInteger(r.id)||r.id<1||r.id>9999999)throw Error('Consecutivo fuera de rango.');const body=r.tipo+r.categoria+r.subcategoria+String(r.id).padStart(7,'0');return body+checkDigit(body);}
 function verifySKU(s){return /^(IN|GG|00)\d{11}[0-9A-Z]$/.test(s)&&checkDigit(s.slice(0,-1))===s.slice(-1)&&Object.hasOwn(CAT,s.slice(2,4))&&Object.hasOwn(SUB,s.slice(4,6))&&Number(s.slice(6,13))>0;}
-const identity=r=>[r.tipo,r.categoria,r.subcategoria,norm(r.nombre),norm(r.proveedor)].join('|');
+const identity=r=>[r.tipo,r.categoria,r.subcategoria,norm(r.nombre),norm(r.proveedor),norm(r.claveProveedor),norm(r.unidadCompra),norm(r.unidadEntrega)].join('|');
 function validateState(s){
  if(!s||s.version!==3||!Array.isArray(s.registros)||!Array.isArray(s.reservados)||!Number.isSafeInteger(s.maxId)||s.maxId<0||s.maxId>9999999)throw Error('Respaldo incompatible o consecutivo inválido.');
  const ids=new Set(),skus=new Set(),filas=new Set();

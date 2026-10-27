@@ -4,9 +4,9 @@ ROOT=pathlib.Path(__file__).resolve().parent.parent;sys.path.insert(0,str(ROOT/'
 import server,requisiciones,ventas,respaldos
 spec=importlib.util.spec_from_file_location('init_local',ROOT/'tools/inicializar.py');initializer=importlib.util.module_from_spec(spec);spec.loader.exec_module(initializer)
 HEADERS={'A':'CLAVE PROVEEDOR','B':'SKU','C':'STATUS DE COMPRA','D':'','E':'PRODUCTO','F':'CATEGORÍA','G':'SUBCATEGORÍA','H':'DESCRIPCIÓN','I':'PRECIO DE COMPRA','L':'U_M','M':'UM_COMPRA','N':'UM_ENTREGA','O':'PROVEEDOR PRINCIPAL','U':'UM_ENTREGA SUCURSALES'}
-def workbook(rows,sheet='PRODUCTOS'):
+def workbook(rows,sheet='PRODUCTOS',headers=None):
  from xml.sax.saxutils import escape
- raw=base64.b64decode(initializer.empty_workbook(sheet,HEADERS));out=io.BytesIO()
+ raw=base64.b64decode(initializer.empty_workbook(sheet,headers or HEADERS));out=io.BytesIO()
  with zipfile.ZipFile(io.BytesIO(raw)) as z,zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as result:
   for entry in z.infolist():
    data=z.read(entry.filename)
@@ -55,6 +55,19 @@ class ModuleBackupTests(unittest.TestCase):
   row['L']='0';self.import_req([row]);report=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(report['resumen']['pendientes'],2);self.assertFalse(report['resumen']['completo']);self.assertEqual(report['resumen']['base'],'0.00')
  def test_multiple_renames_do_not_leave_stale_matching_keys(self):
   self.import_purchase([product('ANTES UNO'),product('ANTES DOS')]);old=self.value('/api/catalogo')['state']['registros'];rows=[product('NUEVO UNO',B=old[0]['sku']),product('NUEVO DOS',B=old[1]['sku']),product('ANTES UNO')];first=self.import_purchase(rows);self.assertEqual(first['resumen']['agregados'],1);second=self.import_purchase(rows);self.assertEqual(second['resumen']['agregados'],0);self.assertEqual(len(self.value('/api/catalogo')['state']['registros']),3)
+ def test_distinct_presentation_and_supplier_code_are_not_duplicates(self):
+  rows=[product('MISMO NOMBRE',A='',M='CUBETA 4 LT',N='LITROS'),product('MISMO NOMBRE',A='',M='LITROS',N='LITROS'),product('MISMO NOMBRE',A='123',M='LITROS',N='LITROS')];self.assertEqual(self.import_purchase(rows)['resumen']['agregados'],3);self.assertEqual(self.import_purchase(rows)['resumen']['agregados'],0);self.assertEqual(len({r['sku'] for r in self.value('/api/catalogo')['state']['registros']}),3)
+ def test_duplicated_legacy_code_does_not_merge_different_products(self):
+  rows=[product('ARTICULO UNO',AD='ANTIGUO_REPETIDO'),product('ARTICULO DOS',AD='ANTIGUO_REPETIDO')];self.assertEqual(self.import_purchase(rows)['resumen']['agregados'],2);self.assertEqual(self.import_purchase(rows)['resumen']['agregados'],0)
+ def test_costo_header_has_priority_and_uom_aliases(self):
+  headers={**HEADERS,'M':'UOM_COMPRA','N':'UOM_ENTREGA','K':'COSTO'};self.value('/api/requisiciones/maestro',{'archivo':'COSTO.xlsx','contenido':workbook([product(K='7.25')],headers=headers)});doc=self.create_req();self.assertEqual(doc['partidas'][0]['unidad'],'KILO');r=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(r['resumen']['base'],'21.75');self.assertEqual(r['detalle'][0]['costoUnitario'],'7.25')
+ def test_sales_reset_can_reimport_same_validated_historical_sku(self):
+  sku='PTPB19'+'TEST000'+'0';master=workbook([{'A':sku,'B':'PRODUCTO TERMINADO','C':'PAN BLANCO','D':'PAN BLANCO','H':'PAN PRUEBA'}],sheet='SUGERIDO',headers={'A':'SKU','B':'PRODUCTOS Y SERVICIOS','C':'CATEGORIA','D':'SUBCATEGORIA','H':'DESCRIPCION'})
+  self.value('/api/ventas/importar',{'revision':self.value('/api/ventas')['revision'],'master':master});review=self.value('/api/respaldos/vaciar/revisar',{'modulo':'ventas'});self.value('/api/respaldos/vaciar/confirmar',{'modulo':'ventas','huellaActual':review['huellaActual'],'confirmar':True,'texto':'VACIAR'});self.assertEqual(self.value('/api/ventas')['state']['registros'],[]);self.value('/api/ventas/importar',{'revision':self.value('/api/ventas')['revision'],'master':master});self.assertEqual(self.value('/api/ventas')['state']['registros'][0]['sku'],sku)
+ def test_reset_module_keeps_other_modules_and_creates_backup(self):
+  self.import_purchase([product()]);self.import_req([product()]);self.create_req();sku=self.value('/api/catalogo')['state']['registros'][0]['sku'];review=self.value('/api/respaldos/vaciar/revisar',{'modulo':'compras'});self.assertEqual(self.call('/api/respaldos/vaciar/confirmar',{'modulo':'compras','huellaActual':review['huellaActual'],'confirmar':True,'texto':'NO'})[0],400)
+  result=self.value('/api/respaldos/vaciar/confirmar',{'modulo':'compras','huellaActual':review['huellaActual'],'confirmar':True,'texto':'VACIAR'});self.assertEqual(len(self.value('/api/catalogo')['state']['registros']),0);self.assertEqual(self.value('/api/requisiciones')['total'],1);self.assertEqual(len(self.value('/api/respaldos/previo/'+result['respaldoPrevio'])['datos']['catalogo']['state']['registros']),1);self.import_purchase([product()]);new=self.value('/api/catalogo')['state']['registros'][0];self.assertEqual(new['id'],2);self.assertNotEqual(new['sku'],sku)
+  review=self.value('/api/respaldos/vaciar/revisar',{'modulo':'requisiciones'});self.value('/api/respaldos/vaciar/confirmar',{'modulo':'requisiciones','huellaActual':review['huellaActual'],'confirmar':True,'texto':'VACIAR'});self.assertEqual(self.value('/api/requisiciones')['total'],0);self.assertEqual(len(self.value('/api/requisiciones/materiales')['materiales']),0);self.import_req([product()]);self.assertEqual(self.create_req()['folio'],2);self.assertEqual(len(self.value('/api/catalogo')['state']['registros']),1)
  def test_backups_restore_only_selected_module_and_keep_folio_floor(self):
   self.import_purchase([product()]);self.import_req([product()]);self.create_req();backups={m:self.value('/api/respaldos?modulo='+m) for m in ('compras','ventas','requisiciones')};self.assertNotIn('users',backups['requisiciones']['datos']['tablas'])
   self.create_req();review=self.review('requisiciones',backups['requisiciones']);self.create_req();stale=self.call('/api/respaldos/restaurar/confirmar',{'modulo':'requisiciones','respaldo':backups['requisiciones'],'huellaActual':review['huellaActual'],'confirmar':True});self.assertEqual(stale[0],409);self.assertEqual(self.value('/api/requisiciones')['total'],3)

@@ -55,13 +55,13 @@ def parse_master(raw,filename):
  if header is None:raise ValueError('Faltan encabezados SKU y DESCRIPCIÓN en PRODUCTOS o en el CSV.')
  index,headers=header
  def col(*labels):return next((headers[x] for x in labels if x in headers),None)
- columns={'sku':col('SKU NUEVO','SKU','CLAVE'),'nombre':col('DESCRIPCION','ARTICULO','NOMBRE','PRODUCTO DESCRIPCION'),'unidad':col('UM ENTREGA','UM ENTREGA SUCURSALES','UNIDAD DE MEDIDA','UNIDAD','UOM','UM COMPRA','UM BASE'),'proveedor':col('PROVEEDOR PRINCIPAL','PROVEEDOR'),'categoria':col('CATEGORIA'),'estado':col('STATUS DE COMPRA','ESTADO','ESTATUS','STATUS')}
- unit_columns=[headers[label] for label in ('UM ENTREGA','UM ENTREGA SUCURSALES','UNIDAD DE MEDIDA','UNIDAD','UOM','UM COMPRA','UM BASE') if label in headers]
+ columns={'sku':col('SKU NUEVO','SKU','CLAVE'),'nombre':col('DESCRIPCION','ARTICULO','NOMBRE','PRODUCTO DESCRIPCION'),'unidad':col('UOM ENTREGA','UM ENTREGA','UOM ENTREGA SUCURSALES','UM ENTREGA SUCURSALES','UNIDAD DE MEDIDA','UNIDAD','UOM','UOM COMPRA','UM COMPRA','UM BASE'),'proveedor':col('PROVEEDOR PRINCIPAL','PROVEEDOR'),'categoria':col('CATEGORIA'),'estado':col('STATUS DE COMPRA','ESTADO','ESTATUS','STATUS')}
+ unit_columns=[headers[label] for label in ('UOM ENTREGA','UM ENTREGA','UOM ENTREGA SUCURSALES','UM ENTREGA SUCURSALES','UNIDAD DE MEDIDA','UNIDAD','UOM','UOM COMPRA','UM COMPRA','UM BASE') if label in headers]
  materials=[];occurrences=collections.Counter()
  for number,row in rows[index+1:]:
   r={k:str(row.get(c,'') or '').strip() if c is not None else '' for k,c in columns.items()}
   r['unidad']=next((str(row[c]).strip() for c in unit_columns if str(row.get(c,'') or '').strip() and norm(row[c]) not in {'SI','NO','N A','NA','TRUE','FALSE','0','1'}),'')
-  for key,labels in {'precioCompra':('PRECIO DE COMPRA','PRECIO COMPRA','COSTO DE COMPRA'),'unidadCompra':('UM COMPRA','UNIDAD COMPRA'),'factorMaestro':('U M','FACTOR','FACTOR CONVERSION'),'costoBaseMaestro':('COSTO',)}.items():
+  for key,labels in {'precioCompra':('PRECIO DE COMPRA','PRECIO COMPRA','COSTO DE COMPRA'),'claveProveedor':('CLAVE PROVEEDOR',),'unidadCompra':('UOM COMPRA','UM COMPRA','UNIDAD COMPRA'),'factorMaestro':('U M','FACTOR','FACTOR CONVERSION'),'costoBaseMaestro':('COSTO','COSTO UNITARIO','COSTO POR UNIDAD DE ENTREGA')}.items():
    c=col(*labels);r[key]=str(row.get(c,'') or '').strip() if c is not None else ''
   if not r['nombre']:continue
   if len(r['nombre'])>500 or len(r['sku'])>100 or len(r['unidad'])>160 or len(r['proveedor'])>500:raise ValueError(f'Fila {number}: datos demasiado largos.')
@@ -139,8 +139,12 @@ class RequisitionStore:
     if len(candidates)>1:candidates=[r for r in candidates if (norm(r['nombre']),norm(r['proveedor']))==(norm(source['nombre']),norm(source['proveedor']))]
     if not candidates:candidates=by_name.get((norm(source['nombre']),norm(source['proveedor'])),[])
     if len(candidates)>1:
+     variants=[r for r in candidates if norm(r.get('claveProveedor',''))==norm(source.get('claveProveedor','')) and norm(r.get('unidadCompra',''))==norm(source.get('unidadCompra',''))]
+     if len(variants)==1:candidates=variants
+    if len(candidates)>1:
      matching=[r for r in candidates if norm(r['unidad'])==norm(source['unidad'])]
      if len(matching)==1:candidates=matching
+    if len(candidates)==1 and candidates[0]['id'] in seen and source['sku'] and source['sku']!=candidates[0]['sku']:candidates=[]
     if len(candidates)>1 or candidates and candidates[0]['id'] in seen:
      skipped+=1;conflicts.append({'fila':source['fila'],'descripcion':source['nombre'],'motivo':'Coincidencia ambigua o fila repetida; identifica el producto con SKU.'});continue
     old=candidates[0] if candidates else None;item={**source}
@@ -224,6 +228,11 @@ class RequisitionStore:
   return document if document and document['sucursal'] in visible_branches(actor) else None
 def document_csv(doc):return csv_bytes([['FOLIO','FECHA SERVIDOR','SUCURSAL','AREA','SOLICITANTE','SKU','ID MATERIAL','DESCRIPCION','CANTIDAD','UNIDAD','OBSERVACIONES','ESTADO','REVISION','MOTIVO CANCELACION'],*[ [doc['numero'],doc['fechaHora'],doc['sucursal'],doc['area'],doc['solicitante'],r['sku'],r['materialId'],r['nombre'],r['cantidad'],r['unidad'],r['observaciones'],doc['estado'],doc.get('revision',1),doc.get('cancelacion',{}).get('motivo','')] for r in doc['partidas']]])
 def print_document(doc):
+ from app_info import TITLE,VERSION,SUPPORT_LINE
+ raw=_print_document_body(doc).decode('utf8');banner='<div style="font:11px Arial;margin-bottom:18px"><strong>'+html.escape(TITLE+' v'+VERSION)+'</strong><br>'+html.escape(SUPPORT_LINE)+'</div>'
+ return raw.replace('<header>',banner+'<header>',1).encode('utf8')
+
+def _print_document_body(doc):
  e=lambda x:html.escape(str(x));rows=''.join('<tr>'+''.join('<td>'+e(x)+'</td>' for x in (i+1,r['sku'] or 'SIN SKU / ID '+str(r['materialId']),r['nombre'],r['cantidad'],r['unidad'],r['observaciones']))+'</tr>' for i,r in enumerate(doc['partidas']))
  return ('<!doctype html><html lang="es"><meta charset="utf-8"><title>'+e(doc['numero'])+'</title><style>body{font:14px Arial;color:#222;margin:35px}header{display:flex;align-items:center;gap:22px;border-bottom:3px solid #284e42;padding-bottom:18px}img{width:85px}h1{font-size:23px}table{border-collapse:collapse;width:100%;margin:22px 0}td,th{padding:10px;border:1px solid #ddd;text-align:left;vertical-align:top}th{background:#f0efea}.meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0}.signatures{display:flex;justify-content:space-around;margin-top:80px}button{padding:12px;background:#284e42;color:white;border:0;margin-bottom:20px}@media print{button{display:none}body{margin:12mm}thead{display:table-header-group}tr{break-inside:avoid}header{break-inside:avoid}}</style><button onclick="window.print()">Imprimir / Guardar PDF</button><header><img src="/logo.png" alt="Grupo Mi Pan"><div><h1>Requisición de materiales</h1><strong>'+e(doc['numero'])+'</strong></div></header><div class="meta"><span><b>Sucursal:</b> '+e(doc['sucursal'])+'</span><span><b>Fecha del servidor:</b> '+e(doc['fechaHora'])+'</span><span><b>Área:</b> '+e(doc['area'])+'</span><span><b>Solicitante:</b> '+e(doc['solicitante'])+'</span><span><b>Capturó:</b> '+e(doc['nombreUsuario'])+' ('+e(doc['creadoPor'])+')</span><span><b>Estado:</b> '+e(doc['estado'])+'</span></div><table><thead><tr><th>#</th><th>SKU / referencia</th><th>Material solicitado</th><th>Cantidad</th><th>Unidad</th><th>Observaciones</th></tr></thead><tbody>'+rows+'</tbody></table><p><b>Observaciones generales:</b> '+e(doc['observaciones'])+'</p><div class="signatures"><span>________________________<br>Solicita</span><span>________________________<br>Entrega</span><span>________________________<br>Recibe</span></div></html>').encode('utf8')
 

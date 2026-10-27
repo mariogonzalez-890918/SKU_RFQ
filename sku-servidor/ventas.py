@@ -163,6 +163,8 @@ class SalesStore:
    for item in incoming['state']['registros']:
     s=item['anterior'];existing=by_sku.get(s) if s else None
     if not s and any(not r['eliminado'] and row_identity(r)==row_identity(item) for r in state['registros']):continue
+    if s in state['reservados'] and existing is None and new.get('historicosReinicio',{}).get(s)==list(row_identity(item)):
+     state['reservados'].remove(s);new['historicosReinicio'].pop(s,None)
     if s in state['reservados'] and (existing is None or not existing['eliminado']):raise ValueError('El maestro contiene un SKU dado de baja o reservado: '+s)
     if existing:
      continue

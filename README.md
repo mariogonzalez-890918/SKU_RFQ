@@ -1,10 +1,12 @@
-# Generador de SKU GMP · SKU_RFQ
+# RFQ_SKU_GMP · Versión 1.1.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
+aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
 ## Descargar EXE
 
-Descarga **SKU-JAD-Servidor.exe** o el ZIP desde [Releases](https://github.com/mariogonzalez-890918/SKU_RFQ/releases/latest). La distribución pública no requiere Python e incluye catálogos vacíos. En el primer inicio solicita crear una contraseña; no lleva credenciales incorporadas. Para actualizar un servidor existente, conserva `data/` y `config.json` junto al EXE.
+Descarga **RFQ_SKU_GMP.exe** o el ZIP desde [Releases](https://github.com/mariogonzalez-890918/SKU_RFQ/releases/latest). La distribución pública no requiere Python e incluye catálogos vacíos. En el primer inicio solicita crear una contraseña; no lleva credenciales incorporadas. Para actualizar un servidor existente, conserva `data/` y `config.json` junto al EXE.
 
 El flujo de GitHub Actions compila y publica los ejecutables automáticamente. También puedes generar una distribución pública local con `python tools/build_public.py --output-dir dist-public` después de instalar `requirements-dev.txt`.
 
@@ -17,6 +19,9 @@ El flujo de GitHub Actions compila y publica los ejecutables automáticamente. T
 - Reportes con filtros, costo por **UM_ENTREGA**, impuestos configurables y descargas XLSX, PDF y CSV. Importe = cantidad solicitada × costo por unidad de entrega; se convierte desde UM_COMPRA mediante una equivalencia válida.
 - Cambios o cancelaciones propuestos por almacenistas, con aprobación de Gerente o Superadministrador e historial. Las canceladas se excluyen del costeo.
 - Respaldo y restauración por módulo (SKU Compras, SKU Ventas o Requisiciones), exclusivos de Superadministrador, con revisión de integridad, copia automática previa y conservación de máximos de folios/identificadores.
+- **Vaciar módulo y cargar desde cero**: revisa, escribe `VACIAR` y confirma. Se guarda copia previa y se conservan usuarios, otros módulos y máximos de identificadores/folios. Luego carga `PRODUCTOS` y descarga el maestro con los SKU nuevos en D.
+
+El reporte reconoce `UM_ENTREGA` y `UOM_ENTREGA`. Usa `COSTO` como costo unitario de entrega; cuando está vacío calcula precio de compra/equivalencia. Una equivalencia cero sigue pendiente de revisión. Se distinguen artículos con el mismo nombre cuando tienen presentación o clave de proveedor distintas.
 
 ## Ejecutar desde el código
 
@@ -71,3 +76,4 @@ Esta prueba utiliza datos vacíos y credenciales aleatorias temporales. Las guí
 | `sku/` | Fuentes de HTML/CSS/JavaScript y definición de PyInstaller |
 | `tools/` | Inicialización local sin datos empresariales |
 | `tests/` | Verificación de instalación limpia |
+

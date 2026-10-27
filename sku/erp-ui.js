@@ -12,6 +12,7 @@ $('gmpNav').append($('gmpNavBackups'));
 for(const route of ['compras','ventas','requisiciones'])$('gmpModuleLinks').append(gmpButtons[route]);
 for(const [route,button] of Object.entries(gmpButtons)){button.hidden=!gmpAllowed[route];button.removeAttribute('role');button.removeAttribute('aria-selected');button.type='button';button.dataset.route=route;gmpLabel(button,gmpNames[route],gmpIcons[route]);button.onclick=()=>gmpNavigate(route);}
 $('gmpAdminCaption').hidden=!canDelete;
+$('gmpAppVersion').textContent=appInfo.titulo+' · Versión '+appInfo.version;$('gmpAppSupport').textContent=appInfo.soporte;
 $('gmpMenuToggle').append(gmpIcon('menu'));
 $('gmpAccountName').textContent=currentUser.name;$('gmpAccountName').title=currentUser.email;$('gmpAccountRole').textContent=roleNames[currentUser.role];$('gmpRoleBadge').textContent=roleNames[currentUser.role];$('gmpAvatar').textContent=currentUser.name.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
 $('gmpLogout').append($('salir'));$('salir').prepend(gmpIcon('logout'));
@@ -94,4 +95,5 @@ if(gmpAllowed.requisiciones)void rqJSON('/meta').then(meta=>{$('gmpMetricRequest
 // Corrección de textos de ayuda para reflejar el flujo de autorización vigente.
 const gmpOldLocations=renderUserLocations;renderUserLocations=function(values){gmpOldLocations(values);if($('usuarioRol').value==='gerente')$('usuarioAccesosNota').textContent='Tiene acceso a las cuatro sucursales. Puede editar reportes, costos y autorizar cambios de requisiciones.';if($('usuarioRol').value==='almacenista')$('usuarioAccesosNota').textContent='Selecciona sus almacenes. Puede consultar sus requisiciones y proponer modificaciones o cancelaciones para aprobación.';};
 window.addEventListener('hashchange',()=>void gmpRenderRoute());await gmpRenderRoute();document.documentElement.setAttribute('data-erp-ready','true');
+
 
