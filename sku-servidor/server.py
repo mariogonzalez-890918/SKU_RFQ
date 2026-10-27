@@ -12,6 +12,7 @@ from autorizaciones import WorkflowStore
 from compras import PurchaseImporter,export_products
 from respaldos import BackupStore
 from app_info import TITLE,VERSION,SUPPORT_LINE
+from imagenes import ImageStore
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
@@ -196,6 +197,7 @@ def create_handler(store):
  reports=ReportStore(store,requisitions)
  workflow=WorkflowStore(store,requisitions,reports)
  purchases=PurchaseImporter(store,sku,validate,protect)
+ images=ImageStore(store,requisitions)
  backups=BackupStore(store,validate,reports)
  class Handler(http.server.BaseHTTPRequestHandler):
   def auth(self):
@@ -237,6 +239,10 @@ def create_handler(store):
     try:
      require_module(actor,'requisiciones')
      query=parse_qs(urlsplit(self.path).query)
+     if path=='/api/requisiciones/imagenes':return self.reply(200,images.list(actor))
+     image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',path)
+     if image_match:
+      raw=images.get(int(image_match[1]),thumbnail=query.get('miniatura')==['1']);return self.reply(200,raw,'image/png') if raw is not None else self.reply(404,{'error':'Este material no tiene imagen.'})
      if path=='/api/requisiciones/reportes':return self.reply(200,{'reportes':reports.definitions(),'puedeEditar':actor['role'] in ('superadmin','gerente')})
      if path=='/api/requisiciones/costos':return self.reply(200,{'costos':reports.costs()})
      if path=='/api/requisiciones/cambios':return self.reply(200,workflow.list(actor))
@@ -288,6 +294,7 @@ def create_handler(store):
    return data
   def do_POST(self):self.mutate()
   def do_PUT(self):self.mutate()
+  def do_DELETE(self):self.mutate()
   def mutate(self):
    origin=self.headers.get('Origin')
    if origin and origin not in ('http://'+self.headers.get('Host',''),'https://'+self.headers.get('Host','')):return self.reply(403,{'error':'Origen no permitido.'})
@@ -310,6 +317,9 @@ def create_handler(store):
     if self.path=='/api/compras/importar' and self.command=='POST':
      write_scope(actor,'compras');return self.reply(200,purchases.run(self.read_body(),actor))
     if self.path.startswith('/api/requisiciones'):require_module(actor,'requisiciones')
+    if self.path=='/api/requisiciones/imagenes' and self.command=='POST':return self.reply(200,images.upload(self.read_body(),actor))
+    image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',self.path)
+    if image_match and self.command=='DELETE':return self.reply(200,images.remove(int(image_match[1]),actor))
     if self.path=='/api/requisiciones/cambios' and self.command=='POST':return self.reply(200,workflow.submit(self.read_body(),actor))
     decision=re.fullmatch('/api/requisiciones/cambios/([a-f0-9]{32})/resolver',self.path)
     if decision and self.command=='POST':return self.reply(200,workflow.decide(decision[1],self.read_body(),actor))

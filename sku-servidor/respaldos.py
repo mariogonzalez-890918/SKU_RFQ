@@ -2,7 +2,7 @@
 import base64,copy,hashlib,hmac,json,pathlib,re,uuid,zipfile,io
 from requisiciones import BRANCHES,AREAS,Conflict,now
 MODULES={'compras':'SKU Compras','ventas':'SKU Ventas','requisiciones':'Requisición de compras / materiales'}
-TABLES=('req_materials','req_masters','req_branches','req_series_registry','req_documents','req_costs','req_reports','req_report_features','req_changes','req_document_versions')
+TABLES=('req_materials','req_masters','req_branches','req_series_registry','req_documents','req_costs','req_reports','req_report_features','req_changes','req_document_versions','req_images')
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 def check(condition,message):
  if not condition:raise ValueError(message)
@@ -62,6 +62,7 @@ class BackupStore:
     validate(catalog)
    workbook(catalog['master']);return
   tables=data.get('tablas')
+  if isinstance(tables,dict) and 'req_images' not in tables:tables['req_images']={'columnas':['material_id','image_id','payload','contenido'],'filas':[]}
   check(isinstance(tables,dict) and set(tables)==set(TABLES),'El respaldo de requisiciones debe incluir maestro, solicitudes, series, costos, reportes y autorizaciones.')
   unpacked={}
   for table in TABLES:
@@ -82,6 +83,11 @@ class BackupStore:
   materials={}
   for row in unpacked['req_materials']:
    item=json.loads(row['payload']);check(type(row['id']) is int and row['id']>0 and row['id'] not in materials and item.get('source_key')==row['source_key'] and isinstance(item.get('nombre'),str) and isinstance(item.get('sku'),str) and isinstance(item.get('unidad'),str) and isinstance(item.get('proveedor'),str) and item.get('estado') in ('ACTIVO','INACTIVO'),'Material inválido o repetido.');materials[row['id']]=item
+  from imagenes import validate_png
+  for row in unpacked['req_images']:
+   image=json.loads(row['payload']);check(row['material_id'] in materials and bool(re.fullmatch('[a-f0-9]{32}',row['image_id'])) and isinstance(image,dict),'Imagen sin material o identificador válido.')
+   raw=base64.b64decode(row.get('contenido',''),validate=True);width,height=validate_png(raw,image.get('archivo',''))
+   check(image.get('ancho')==width and image.get('alto')==height and image.get('bytes')==len(raw) and all(isinstance(image.get(k),str) for k in ('skuAlCargar','actualizado','cargadoPor')),'Metadatos de imagen inválidos.')
   branches=unpacked['req_branches'];check({r['branch'] for r in branches}==set(BRANCHES) and len(branches)==len(BRANCHES),'Deben existir las cuatro sucursales.')
   for row in branches:check(re.fullmatch('[A-Z0-9][A-Z0-9-]{1,19}',row['series']) and type(row['next_folio']) is int and 1<=row['next_folio']<=1000000000 and type(row['revision']) is int and row['revision']>=1,'Serie o folio inválido.')
   registry={}
@@ -116,7 +122,7 @@ class BackupStore:
  def summary(self,module,data):
   if module in ('compras','ventas'):
    state=data['catalogo']['state'];return {'articulos':len(state['registros']),'activos':sum(not r['eliminado'] for r in state['registros']),'consecutivo':state['maxId'],'skuReservados':len(state['reservados'])}
-  tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas'])}
+  tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas']),'imagenes':len(tables['req_images']['filas'])}
  def review(self,data,actor,apply=False):
   module=data.get('modulo');self.authorize(actor,module);incoming,legacy=self.unpack(module,data.get('respaldo'))
   with self.store.connect() as db:

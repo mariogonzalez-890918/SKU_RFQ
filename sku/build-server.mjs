@@ -52,15 +52,16 @@ template=template.replace(/SUPER ADMINISTRADOR/g,'SUPERADMINISTRADOR').replace('
 template=template.replace('Se reutiliza el SKU existente cuando el artículo está identificado. Se asignan nuevos consecutivos a los artículos nuevos. La descarga usa el archivo cargado como plantilla, conservando sus otras columnas.','La carga agrega artículos nuevos sin reemplazar el maestro actual ni sobrescribir los existentes. Se omiten los SKU y artículos ya registrados.');
 template=template.replace('Subir maestro Excel (.xlsx)','Subir maestro de compras sin sobrescribir');
 template=template.replace(/<details><summary>Subir maestro de compras sin sobrescribir<\/summary>[\s\S]*?<\/details>/,await fs.readFile('sku/purchase-master-panel.html','utf8'));
+template=template.replace('<dialog id="rqDetalle">',await fs.readFile('sku/images-panel.html','utf8')+'<dialog id="rqDetalle">');
 template=template.replace('</main>',await fs.readFile('sku/backup-panel.html','utf8')+'</main>');
 template=template.replace('<main>',await fs.readFile('sku/erp-shell.html','utf8')+'<main id="gmpMain" tabindex="-1">'+await fs.readFile('sku/erp-pages.html','utf8'));
 template=template.replaceAll('Generador de SKU GMP','RFQ_SKU_GMP');
 await fs.writeFile(dir+'/public/index.html',template);
 let login=await fs.readFile(dir+'/public/login.html','utf8');
 login=login.replace(/<style id="gmp-login-theme">[\s\S]*?<\/style>/g,'').replace('</style>','</style><style id="gmp-login-theme">'+await fs.readFile('sku/login-theme.css','utf8')+'</style>').replace('Acceso a los catálogos de compras y ventas','Catálogos, requisiciones y reportes en un solo lugar');
-login=login.replaceAll('Generador de SKU GMP','RFQ_SKU_GMP').replace(/<p id="appLoginInfo">[\s\S]*?<\/p>/g,'').replace('</h1>','</h1><p id="appLoginInfo">Versión 1.1.1<br>aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026</p>');
+login=login.replaceAll('Generador de SKU GMP','RFQ_SKU_GMP').replace(/<p id="appLoginInfo">[\s\S]*?<\/p>/g,'').replace('</h1>','</h1><p id="appLoginInfo">Versión 1.2.0<br>aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026</p>');
 await fs.writeFile(dir+'/public/login.html',login);
-await fs.writeFile(dir+'/public/app.js',engine+'\n'+await fs.readFile('sku/xlsx-browser.js','utf8')+'\n'+ui+'\n'+await fs.readFile('sku/roles-ui.js','utf8')+'\n'+await fs.readFile('sku/sales-ui.js','utf8')+'\n'+await fs.readFile('sku/requisition-ui.js','utf8')+'\n'+await fs.readFile('sku/profile-modules-ui.js','utf8')+'\n'+await fs.readFile('sku/report-ui.js','utf8')+'\n'+await fs.readFile('sku/report-pagination-ui.js','utf8')+'\n'+await fs.readFile('sku/report-export-ui.js','utf8')+'\n'+await fs.readFile('sku/workflow-ui.js','utf8')+'\n'+await fs.readFile('sku/erp-ui.js','utf8')+'\n'+await fs.readFile('sku/purchase-master-ui.js','utf8')+'\n'+await fs.readFile('sku/backup-ui.js','utf8'));
+await fs.writeFile(dir+'/public/app.js',engine+'\n'+await fs.readFile('sku/xlsx-browser.js','utf8')+'\n'+ui+'\n'+await fs.readFile('sku/roles-ui.js','utf8')+'\n'+await fs.readFile('sku/sales-ui.js','utf8')+'\n'+await fs.readFile('sku/requisition-ui.js','utf8')+'\n'+await fs.readFile('sku/profile-modules-ui.js','utf8')+'\n'+await fs.readFile('sku/report-ui.js','utf8')+'\n'+await fs.readFile('sku/report-pagination-ui.js','utf8')+'\n'+await fs.readFile('sku/report-export-ui.js','utf8')+'\n'+await fs.readFile('sku/workflow-ui.js','utf8')+'\n'+await fs.readFile('sku/erp-ui.js','utf8')+'\n'+await fs.readFile('sku/purchase-master-ui.js','utf8')+'\n'+await fs.readFile('sku/backup-ui.js','utf8')+'\n'+await fs.readFile('sku/images-ui.js','utf8')+'\n'+await fs.readFile('sku/navigation-ui.js','utf8'));
 console.log('App servidor generada.');
 
 

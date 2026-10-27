@@ -36,14 +36,16 @@ const purchaseNotes=[...$('comprasPanel').querySelectorAll(':scope > p')];const 
 gmpTabs($('comprasPanel'),'compras',[
  ['catalogo','Catálogo',[$('excel').closest('.actions'),$('buscar').closest('.grid'),$('total'),$('registros').closest('.scroll')]],
  ['nuevo','Nuevo artículo',[$('nuevo').closest('details')],canEdit],
- ['cargar','Cargar listas',[$('listaTexto').closest('details'),$('maestroArchivo').closest('details')],canEdit],
+ ['cargar','Carga de lista',[$('listaTexto').closest('details')],canEdit],
+ ['maestro','Maestro de compras',[$('maestroArchivo').closest('details')],canEdit],
  ['ayuda','Ayuda y códigos',[purchaseHelp,$('skuVerificar').closest('details'),$('catalogos').closest('details')]]
 ],'catalogo');
 const salesNotes=[...$('ventasPanel').querySelectorAll(':scope > p:not([id])')],salesHelp=document.createElement('div');salesHelp.className='gmp-help';for(const p of salesNotes)salesHelp.append(p);
 gmpTabs($('ventasPanel'),'ventas',[
  ['catalogo','Catálogo',[$('ventasActualizar').closest('.actions'),$('vBuscar').closest('.grid'),$('vTotal'),$('vRegistros').closest('.scroll')]],
  ['nuevo','Nuevo artículo',[$('ventasAltaPanel')],salesWrite&&salesRead],
- ['cargar','Cargar listas',[$('ventasLotePanel'),$('ventasImportarPanel')],salesWrite&&salesRead],
+ ['cargar','Carga de lista',[$('ventasLotePanel')],salesWrite&&salesRead],
+ ['maestro','Maestro de ventas',[$('ventasImportarPanel')],salesWrite&&salesRead],
  ['ayuda','Ayuda y códigos',[salesHelp,$('vCatalogos').closest('details')]]
 ],'catalogo');
 const gmpOriginalEdit=vEdit;vEdit=function(record){gmpSelect('ventas','nuevo');gmpOriginalEdit(record);};
@@ -51,12 +53,14 @@ const reqHistoryHeading=$('rqHistSucursal').closest('.section-heading');
 gmpTabs($('requisicionesPanel'),'requisiciones',[
  ['nueva','Nueva solicitud',[$('rqAlta')],rqCanWrite],
  ['historial','Historial',[reqHistoryHeading,$('rqHistTotal'),$('rqHistorial').closest('.scroll'),$('rqAnterior').closest('.actions')]],
- ['maestro','Maestro de materiales',[$('rqMasterInfo'),$('rqCargarPanel'),$('rqBuscarCatalogo').closest('details')]],
+ ['catalogo','Consultar materiales',[$('rqMasterInfo'),$('rqBuscarCatalogo').closest('details')]],
+ ['maestro','Cargar maestro',[$('rqCargarPanel')],rqCanImport],
+ ['imagenes','Imágenes por SKU',[$('rqImagesPanel')]],
  ['series','Series y folios',[$('rqSeriesPanel')],canDelete]
 ],rqCanWrite?'nueva':'historial');
 for(const panel of [$('rqAlta'),$('ventasAltaPanel'),$('nuevo').closest('details')]){panel.classList.add('gmp-flat-panel');panel.open=true;}
 $('rqBuscarCatalogo').closest('details').open=true;$('rqSeriesPanel').open=true;
-const gmpMasterDownloads=document.createElement('div');gmpMasterDownloads.className='actions';gmpMasterDownloads.append($('rqCatalogoCSV'),$('rqMaestroOriginal'));gmpSegments.requisiciones.views.maestro.prepend(gmpMasterDownloads);
+const gmpMasterDownloads=document.createElement('div');gmpMasterDownloads.className='actions';gmpMasterDownloads.append($('rqCatalogoCSV'),$('rqMaestroOriginal'));gmpSegments.requisiciones.views.catalogo.prepend(gmpMasterDownloads);
 const gmpOriginalMaterials=rqRenderMaterials;rqRenderMaterials=function(){gmpOriginalMaterials();const select=$('rqMaterial');select.size=Math.min(5,Math.max(1,select.options.length));select.style.height=select.options.length<=1?'48px':'145px';};
 $('rqBuscarMaterial').oninput=rqRenderMaterials;
 function gmpStatusCell(cell,state){const badge=document.createElement('span');badge.className='gmp-status gmp-status-'+state.toLowerCase();badge.textContent=state;cell.replaceChildren(badge);}
