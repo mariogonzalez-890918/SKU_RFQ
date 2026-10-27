@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.4.0
+# RFQ_SKU_GMP · Versión 1.5.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -17,6 +17,10 @@ El perfil **AUXTI** tiene acceso administrativo y puede descargar respaldos. Las
 El perfil **Gerente** puede emitir requisiciones, cargar el maestro de materiales, configurar series y folios de las cuatro sucursales, gestionar reportes y autorizar cambios. No puede retroceder folios ni reutilizar series de otra sucursal. La actualización habilita Cargar maestros para las cuentas de Gerente existentes; Sistemas puede ajustar luego sus accesos.
 
 El perfil **Requisición** permite crear solicitudes y consultar exclusivamente las registradas por la propia cuenta en las sucursales asignadas en Usuarios, con impresión de esas solicitudes y propuestas de corrección que requieren aprobación de Gerente o Superadministrador. Las propuestas no cambian la solicitud hasta autorizarse. El alcance se comprueba también en el servidor y se basa en la cuenta que capturó, no en el nombre escrito en Solicitante. No tiene acceso a costos, reportes, maestros, series, autorizaciones de otras cuentas ni administración; tampoco puede cancelar solicitudes. Sus únicos submenús son Nueva solicitud y Mis requisiciones. En Usuarios puedes asignar el perfil a nuevas cuentas; no se crea una cuenta con contraseña predeterminada.
+
+Las contraseñas nuevas requieren de 4 a 200 caracteres. En el acceso y en Usuarios está la casilla **Mostrar contraseña** para revisarla antes de enviar el formulario.
+
+En Requisiciones → **Áreas solicitantes**, Superadministrador, AUXTI y Gerente pueden agregar y editar áreas. Los nombres anteriores se conservan para las requisiciones emitidas, correcciones y filtros de reportes. El catálogo se incluye en el respaldo de requisiciones.
 
 ## Descargar EXE
 

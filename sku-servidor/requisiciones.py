@@ -86,6 +86,8 @@ class Conflict(ValueError):pass
 class RequisitionStore:
  def __init__(self,store):
   self.store=store
+  from areas import AreaStore
+  self.areas=AreaStore(store,AREAS)
   with store.connect() as db:
    db.execute('CREATE TABLE IF NOT EXISTS req_materials(id INTEGER PRIMARY KEY AUTOINCREMENT,source_key TEXT UNIQUE NOT NULL,payload TEXT NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS req_masters(id INTEGER PRIMARY KEY AUTOINCREMENT,filename TEXT NOT NULL,created_at TEXT NOT NULL,actor TEXT NOT NULL,content TEXT NOT NULL,report TEXT NOT NULL)')
@@ -130,7 +132,7 @@ class RequisitionStore:
    count=db.execute('SELECT COUNT(*) FROM req_documents'+where,params).fetchone()[0]
   master_report=json.loads(master[2])
   if actor and actor['role']=='requisicion':master_report={key:master_report[key] for key in ('hoja','total') if key in master_report}
-  return {'areas':AREAS,'sucursales':branches,'fechaServidor':now(),'zonaHoraria':'Ciudad de México (UTC-06:00)','maestro':{'archivo':master[0],'cargado':master[1],**master_report},'totalSolicitudes':count}
+  return {'areas':self.areas.names(),'areasReporte':self.areas.names(historical=True) if not actor or actor['role']!='requisicion' else self.areas.names(),'sucursales':branches,'fechaServidor':now(),'zonaHoraria':'Ciudad de México (UTC-06:00)','maestro':{'archivo':master[0],'cargado':master[1],**master_report},'totalSolicitudes':count}
  def materials(self):
   with self.store.connect() as db:rows=db.execute('SELECT id,payload FROM req_materials ORDER BY id').fetchall()
   result=[{'id':id,**json.loads(payload)} for id,payload in rows];counts=collections.Counter(r['sku'] for r in result if r['sku'])
@@ -194,7 +196,7 @@ class RequisitionStore:
   allowed={'sucursal','area','solicitante','observaciones','partidas','claveCliente'}
   if set(data)-allowed:raise ValueError('Fecha, serie y folio son asignados por el servidor y no se pueden modificar.')
   branch=data.get('sucursal');area=data.get('area');requester=text(data.get('solicitante',''),160);notes=text(data.get('observaciones',''),2000);key=text(data.get('claveCliente',''),100);lines=data.get('partidas')
-  if branch not in BRANCHES or area not in AREAS or not requester or not re.fullmatch('[A-Za-z0-9_-]{16,100}',key) or not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Selecciona sucursal, área, solicitante y entre 1 y 200 partidas.')
+  if branch not in BRANCHES or area not in self.areas.names() or not requester or not re.fullmatch('[A-Za-z0-9_-]{16,100}',key) or not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Selecciona sucursal, área, solicitante y entre 1 y 200 partidas.')
   if branch not in visible_branches(actor):raise PermissionError('No tienes acceso para solicitar materiales en esta sucursal.')
   canonical={'sucursal':branch,'area':area,'solicitante':requester,'observaciones':notes,'partidas':[]};seen=set()
   for line in lines:
@@ -211,6 +213,7 @@ class RequisitionStore:
    if existing:
     if existing[0]!=fingerprint:raise Conflict('La clave de envío ya corresponde a otra solicitud. Inicia una solicitud nueva.')
     document=json.loads(existing[1]);return {'documento':requester_document(document) if actor['role']=='requisicion' else document,'repetido':True}
+   if area not in self.areas.names(db=db):raise Conflict('El área cambió mientras se preparaba la solicitud. Actualiza y selecciónala de nuevo.')
    ids=[line['materialId'] for line in canonical['partidas']]
    material_rows=dict(db.execute('SELECT id,payload FROM req_materials WHERE id IN ('+','.join('?' for _ in ids)+')',ids))
    snapshots=[]

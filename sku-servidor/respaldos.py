@@ -1,8 +1,9 @@
 """Respaldo/restauración por módulo con revisión, detección de concurrencia y copia previa."""
 import base64,copy,hashlib,hmac,json,pathlib,re,uuid,zipfile,io
 from requisiciones import BRANCHES,AREAS,Conflict,now
+from areas import default_catalog,validate_catalog
 MODULES={'compras':'SKU Compras','ventas':'SKU Ventas','requisiciones':'Requisición de compras / materiales'}
-TABLES=('req_materials','req_masters','req_branches','req_series_registry','req_documents','req_costs','req_reports','req_report_features','req_changes','req_document_versions','req_images')
+TABLES=('req_materials','req_masters','req_branches','req_series_registry','req_documents','req_costs','req_reports','req_report_features','req_changes','req_document_versions','req_images','req_areas')
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 def check(condition,message):
  if not condition:raise ValueError(message)
@@ -63,6 +64,7 @@ class BackupStore:
    workbook(catalog['master']);return
   tables=data.get('tablas')
   if isinstance(tables,dict) and 'req_images' not in tables:tables['req_images']={'columnas':['material_id','image_id','payload','contenido'],'filas':[]}
+  if isinstance(tables,dict) and 'req_areas' not in tables:tables['req_areas']={'columnas':['id','revision','payload'],'filas':[[1,1,json.dumps(default_catalog(AREAS),ensure_ascii=False)]]}
   check(isinstance(tables,dict) and set(tables)==set(TABLES),'El respaldo de requisiciones debe incluir maestro, solicitudes, series, costos, reportes y autorizaciones.')
   unpacked={}
   for table in TABLES:
@@ -80,6 +82,7 @@ class BackupStore:
      if None in value:continue
      check(value not in seen_keys,'Identificadores o claves repetidas en '+table+'.');seen_keys.add(value)
    unpacked[table]=[dict(zip(columns,row)) for row in rows]
+  area_rows=unpacked['req_areas'];check(len(area_rows)==1 and area_rows[0]['id']==1 and type(area_rows[0]['revision']) is int and area_rows[0]['revision']>=1,'Falta un catálogo de áreas válido.');area_names=validate_catalog(json.loads(area_rows[0]['payload']))
   materials={}
   for row in unpacked['req_materials']:
    item=json.loads(row['payload']);check(type(row['id']) is int and row['id']>0 and row['id'] not in materials and item.get('source_key')==row['source_key'] and isinstance(item.get('nombre'),str) and isinstance(item.get('sku'),str) and isinstance(item.get('unidad'),str) and isinstance(item.get('proveedor'),str) and item.get('estado') in ('ACTIVO','INACTIVO'),'Material inválido o repetido.');materials[row['id']]=item
@@ -95,7 +98,7 @@ class BackupStore:
    check(row['branch'] in BRANCHES and re.fullmatch('[A-Z0-9][A-Z0-9-]{1,19}',row['series']) and row['series'] not in registry,'Registro de series inválido.');registry[row['series']]=row['branch']
   for row in branches:check(registry.get(row['series'])==row['branch'],'La serie no pertenece a su sucursal.')
   def document(doc):
-   check(isinstance(doc,dict) and re.fullmatch('[a-f0-9]{32}',doc.get('id','')) and doc.get('sucursal') in BRANCHES and doc.get('area') in AREAS and doc.get('estado') in ('SOLICITADA','CANCELADA') and type(doc.get('folio')) is int and doc['folio']>=1 and doc.get('numero')==doc.get('serie','')+'-'+str(doc['folio']).zfill(6),'Requisición inválida.')
+   check(isinstance(doc,dict) and re.fullmatch('[a-f0-9]{32}',doc.get('id','')) and doc.get('sucursal') in BRANCHES and doc.get('area') in area_names and doc.get('estado') in ('SOLICITADA','CANCELADA') and type(doc.get('folio')) is int and doc['folio']>=1 and doc.get('numero')==doc.get('serie','')+'-'+str(doc['folio']).zfill(6),'Requisición inválida.')
    check(isinstance(doc.get('fechaHora'),str) and doc.get('fecha')==doc['fechaHora'][:10] and isinstance(doc.get('solicitante'),str) and isinstance(doc.get('observaciones'),str),'Fecha o texto de requisición inválido.')
    lines=doc.get('partidas');check(isinstance(lines,list) and 1<=len(lines)<=200,'Partidas inválidas.');seen=set()
    from reportes import dec
@@ -112,7 +115,7 @@ class BackupStore:
    if c.get('costoEntrega') not in ('',None):dec(c['costoEntrega'])
    if c.get('factor') is not None:dec(c['factor'])
   for row in unpacked['req_reports']:
-   c=json.loads(row['payload']);check(c.get('id')==row['id'] and re.fullmatch('[A-Za-z0-9_-]{1,64}',row['id']) and type(row['revision']) is int and row['revision']>=1,'Reporte inválido.');self.reports.config(c)
+   c=json.loads(row['payload']);check(c.get('id')==row['id'] and re.fullmatch('[A-Za-z0-9_-]{1,64}',row['id']) and type(row['revision']) is int and row['revision']>=1,'Reporte inválido.');self.reports.config(c,area_names=area_names)
   for row in unpacked['req_changes']:
    c=json.loads(row['payload']);check(c.get('objetivo') in docs and c.get('id')==row['id'] and c.get('sucursal')==row['branch'] and c.get('solicitadoPor')==row['requester'] and c.get('estado')==row['status'] and c.get('estado') in ('PENDIENTE','APROBADA','RECHAZADA') and c.get('tipo') in ('cancelar','modificar') and type(c.get('revision')) is int,'Autorización inválida.')
    if c['tipo']=='modificar':
@@ -122,7 +125,7 @@ class BackupStore:
  def summary(self,module,data):
   if module in ('compras','ventas'):
    state=data['catalogo']['state'];return {'articulos':len(state['registros']),'activos':sum(not r['eliminado'] for r in state['registros']),'consecutivo':state['maxId'],'skuReservados':len(state['reservados'])}
-  tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas']),'imagenes':len(tables['req_images']['filas'])}
+  tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas']),'imagenes':len(tables['req_images']['filas']),'areas':len(json.loads(tables['req_areas']['filas'][0][2])['areas'])}
  def review(self,data,actor,apply=False):
   if apply and actor['role']!='superadmin':raise PermissionError('AUXTI necesita aprobación de sistemas para reemplazar o vaciar datos.')
   module=data.get('modulo');self.authorize(actor,module);incoming,legacy=self.unpack(module,data.get('respaldo'))
@@ -145,6 +148,7 @@ class BackupStore:
     for table in reversed(TABLES):db.execute('DELETE FROM '+table)
     for table in TABLES:
      t=incoming['tablas'][table];columns=t['columnas'];db.executemany('INSERT INTO '+table+'('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',t['filas'])
+    db.execute('UPDATE req_areas SET revision=MAX(revision,?)+1 WHERE id=1',(current['tablas']['req_areas']['filas'][0][1],))
     for branch,(floor,rev) in old_branches.items():db.execute('UPDATE req_branches SET next_folio=MAX(next_folio,?),revision=MAX(revision,?)+1 WHERE branch=?',(floor,rev,branch))
     for branch in BRANCHES:
      floor=db.execute('SELECT COALESCE(MAX(folio),0)+1 FROM req_documents WHERE branch=?',(branch,)).fetchone()[0];db.execute('UPDATE req_branches SET next_folio=MAX(next_folio,?) WHERE branch=?',(floor,branch))
@@ -173,7 +177,7 @@ class BackupStore:
     db.execute('INSERT INTO '+history+' VALUES(?,?,?)',(current['revision'],now(),old));db.execute('UPDATE '+table+' SET revision=?,payload=? WHERE id=1',(current['revision']+1,json.dumps(catalog,ensure_ascii=False)))
    else:
     for table in TABLES:
-     if table not in ('req_branches','req_series_registry'):db.execute('DELETE FROM '+table)
+     if table not in ('req_branches','req_series_registry','req_areas'):db.execute('DELETE FROM '+table)
     db.execute('UPDATE req_branches SET revision=revision+1')
     report={'archivo':'PRODUCTOS VACIO.xlsx','hoja':'PRODUCTOS','total':0,'sinSku':0,'sinUnidad':0,'skuRepetidos':0,'inactivos':0};db.execute('INSERT INTO req_masters(filename,created_at,actor,content,report) VALUES(?,?,?,?,?)',(report['archivo'],now(),actor['email'],blank_master('PRODUCTOS'),json.dumps(report)))
     config=self.reports.config({'nombre':'Reporte general de requisiciones'});config.update({'id':'general','editor':actor['email'],'actualizado':now()});db.execute('INSERT INTO req_reports VALUES(?,1,?)',('general',json.dumps(config,ensure_ascii=False)))

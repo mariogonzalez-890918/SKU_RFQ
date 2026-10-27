@@ -17,7 +17,7 @@ def empty_workbook(sheet,headers):
 def create_initials(directory,password):
  directory=pathlib.Path(directory);names=['initial.json','initial-admin.json','initial-ventas.json','initial-requisiciones.json']
  if any((directory/name).exists() for name in names):raise ValueError('Ya existen archivos iniciales. No se sobrescriben; conserva la instalación actual.')
- if not isinstance(password,str) or not 10<=len(password)<=200:raise ValueError('La contraseña requiere entre 10 y 200 caracteres.')
+ if not isinstance(password,str) or not 4<=len(password)<=200:raise ValueError('La contraseña requiere entre 4 y 200 caracteres.')
  directory.mkdir(parents=True,exist_ok=True)
  purchases=empty_workbook('COMPRAS',{'A':'ID','B':'SKU ANTERIOR','C':'ESTADO','D':'SKU NUEVO','E':'PRODUCTO','F':'CATEGORÍA','G':'SUBCATEGORÍA','H':'DESCRIPCIÓN','O':'PROVEEDOR'})
  sales=empty_workbook('SUGERIDO',{'A':'SKU','B':'PRODUCTOS Y SERVICIOS','C':'CATEGORIA','D':'SUBCATEGORIA','F':'MODULO ID PDV','H':'DESCRIPCIÓN','S':'ESTADO'})
@@ -30,7 +30,7 @@ def create_initials(directory,password):
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output-dir',type=pathlib.Path,default=ROOT/'sku-servidor');args=parser.parse_args()
  if any((args.output_dir/name).exists() for name in ['initial.json','initial-admin.json','initial-ventas.json','initial-requisiciones.json']):parser.error('Esta instalación ya tiene archivos iniciales. No se sobrescribirá ninguno.')
- password=getpass.getpass('Contraseña nueva para sistemas@grupomipan.com (mínimo 10 caracteres): ')
+ password=getpass.getpass('Contraseña nueva para sistemas@grupomipan.com (mínimo 4 caracteres): ')
  if password!=getpass.getpass('Confirma la contraseña: '):parser.error('Las contraseñas no coinciden.')
  try:create_initials(args.output_dir,password)
  except ValueError as error:parser.error(str(error))

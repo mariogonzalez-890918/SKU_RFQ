@@ -56,7 +56,8 @@ gmpTabs($('requisicionesPanel'),'requisiciones',[
  ['catalogo','Consultar materiales',[$('rqMasterInfo'),$('rqBuscarCatalogo').closest('details')],currentUser.role!=='requisicion'],
  ['maestro','Cargar maestro',[$('rqCargarPanel')],rqCanImport],
  ['imagenes','Imágenes por SKU',[$('rqImagesPanel')],currentUser.modulos.includes('imagenes')],
- ['series','Series y folios',[$('rqSeriesPanel')],rqCanConfigure]
+ ['series','Series y folios',[$('rqSeriesPanel')],rqCanConfigure],
+ ['areas','Áreas solicitantes',[$('rqAreasPanel')],rqCanConfigure]
 ],rqCanWrite?'nueva':'historial');
 for(const panel of [$('rqAlta'),$('ventasAltaPanel'),$('nuevo').closest('details')]){panel.classList.add('gmp-flat-panel');panel.open=true;}
 $('rqBuscarCatalogo').closest('details').open=true;$('rqSeriesPanel').open=true;

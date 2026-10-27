@@ -133,11 +133,11 @@ class ReportStore:
  def definitions(self):
   with self.store.connect() as db:rows=db.execute('SELECT revision,payload FROM req_reports ORDER BY rowid').fetchall()
   return [{**json.loads(payload),'revision':rev} for rev,payload in rows]
- def config(self,data):
+ def config(self,data,area_names=None):
   name=text(data.get('nombre',''),120)
   if not name:raise ValueError('Escribe un nombre para el reporte.')
   c={'nombre':name}
-  for key,allowed in [('sucursales',BRANCHES),('areas',AREAS)]:
+  for key,allowed in [('sucursales',BRANCHES),('areas',self.requisitions.areas.names(historical=True) if area_names is None else area_names)]:
    values=data.get(key,[])
    if not isinstance(values,list) or any(not isinstance(v,str) or v not in allowed for v in values) or len(set(values))!=len(values):raise ValueError('Filtro inválido: '+key)
    c[key]=values

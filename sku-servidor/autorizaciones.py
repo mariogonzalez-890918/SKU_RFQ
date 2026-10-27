@@ -34,7 +34,7 @@ class WorkflowStore:
    values=data.get('datos')
    if not isinstance(values,dict) or set(values)-{'area','solicitante','observaciones','partidas'}:raise ValueError('Solo pueden corregirse área, solicitante, observaciones y partidas. Fecha, sucursal, SKU y folio se conservan.')
    area=values.get('area');requester=text(values.get('solicitante',''),160);notes=text(values.get('observaciones',''),2000);lines=values.get('partidas')
-   if area not in AREAS or not requester or not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Indica área, solicitante y entre 1 y 200 partidas.')
+   if (area!=doc['area'] and area not in self.requisitions.areas.names(db=db)) or not requester or not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Indica área, solicitante y entre 1 y 200 partidas.')
    old={line['materialId']:line for line in doc['partidas']};seen=set();snapshots=[]
    for line in lines:
     if not isinstance(line,dict) or set(line)-{'materialId','cantidad','observaciones'}:raise ValueError('Partida inválida.')

@@ -26,7 +26,7 @@ def write_scope(actor,scope):
  if actor['role'] not in ('superadmin','auxti','alta',scope):raise PermissionError('Tu perfil solo permite consultar este módulo.')
 def password_hash(password,salt):return hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),310000).hex()
 def new_password(password):
- if not isinstance(password,str) or not 10<=len(password)<=200:raise ValueError('La contraseña debe tener entre 10 y 200 caracteres.')
+ if not isinstance(password,str) or not 4<=len(password)<=200:raise ValueError('La contraseña debe tener entre 4 y 200 caracteres.')
  salt=secrets.token_hex(16);return salt,password_hash(password,salt)
 def norm(value):
  return ' '.join(''.join(c for c in unicodedata.normalize('NFD',str(value or '')) if not unicodedata.combining(c)).upper().split())
@@ -112,7 +112,7 @@ class Store:
       import getpass
       print('PRIMER INICIO: define la contraseña de '+ADMIN_EMAIL+'. No hay contraseña predeterminada.',flush=True)
       while admin is None:
-       password=getpass.getpass('Contraseña nueva (mínimo 10 caracteres): ')
+       password=getpass.getpass('Contraseña nueva (mínimo 4 caracteres): ')
        if password!=getpass.getpass('Confirma la contraseña: '):print('Las contraseñas no coinciden.',flush=True);continue
        try:salt,digest=new_password(password);admin={'salt':salt,'password_hash':digest}
        except ValueError as error:print(str(error),flush=True)
@@ -278,6 +278,7 @@ def create_handler(store):
       if report_match[2]=='xlsx':return self.reply(200,report_xlsx(result),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       if report_match[2]=='pdf':return self.reply(200,report_pdf(result),'application/pdf')
       return self.reply(200,report_csv(result),'text/csv; charset=utf-8') if report_match[2]=='csv' else self.reply(200,result)
+     if path=='/api/requisiciones/areas':return self.reply(200,requisitions.areas.list(actor))
      if path=='/api/requisiciones/meta':return self.reply(200,requisitions.metadata(actor))
      if path=='/api/requisiciones/materiales':
       materials=requisitions.materials()
@@ -360,6 +361,9 @@ def create_handler(store):
     if self.path=='/api/requisiciones/imagenes' and self.command=='POST':return self.reply(200,images.upload(self.read_body(),actor))
     image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',self.path)
     if image_match and self.command=='DELETE':return self.reply(200,images.remove(int(image_match[1]),actor))
+    if self.path=='/api/requisiciones/areas' and self.command=='POST':return self.reply(200,requisitions.areas.save(self.read_body(),actor))
+    area_match=re.fullmatch('/api/requisiciones/areas/([1-9][0-9]*)',self.path)
+    if area_match and self.command=='PUT':return self.reply(200,requisitions.areas.save(self.read_body(),actor,int(area_match[1])))
     if self.path=='/api/requisiciones/cambios' and self.command=='POST':return self.reply(200,workflow.submit(self.read_body(),actor))
     decision=re.fullmatch('/api/requisiciones/cambios/([a-f0-9]{32})/resolver',self.path)
     if decision and self.command=='POST':return self.reply(200,workflow.decide(decision[1],self.read_body(),actor))
