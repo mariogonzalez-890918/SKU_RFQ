@@ -43,6 +43,7 @@
 !/tests/test_public_source.py
 !/tests/test_backup_import.py
 !/tests/test_images.py
+!/tests/test_auxti.py
 !/tests/mobile_menu_regression.mjs
 **/__pycache__/
 *.pyc

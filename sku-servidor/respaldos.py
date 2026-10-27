@@ -29,7 +29,7 @@ def blank_master(sheet):
 class BackupStore:
  def __init__(self,store,validate_purchase,reports):self.store=store;self.validate_purchase=validate_purchase;self.reports=reports
  def authorize(self,actor,module):
-  if actor['role']!='superadmin':raise PermissionError('Respaldar y restaurar es exclusivo de Superadministrador.')
+  if actor['role'] not in ('superadmin','auxti'):raise PermissionError('Solo administración puede consultar respaldos.')
   if module not in MODULES:raise ValueError('Selecciona SKU Compras, SKU Ventas o Requisiciones.')
  def snapshot(self,db,module):
   if module in ('compras','ventas'):
@@ -124,6 +124,7 @@ class BackupStore:
    state=data['catalogo']['state'];return {'articulos':len(state['registros']),'activos':sum(not r['eliminado'] for r in state['registros']),'consecutivo':state['maxId'],'skuReservados':len(state['reservados'])}
   tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas']),'imagenes':len(tables['req_images']['filas'])}
  def review(self,data,actor,apply=False):
+  if apply and actor['role']!='superadmin':raise PermissionError('AUXTI necesita aprobación de sistemas para reemplazar o vaciar datos.')
   module=data.get('modulo');self.authorize(actor,module);incoming,legacy=self.unpack(module,data.get('respaldo'))
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);current_hash=digest(current);self.validate(db,module,incoming)
@@ -155,6 +156,7 @@ class BackupStore:
  def previous(self,id,actor):
   self.authorize(actor,'compras');check(bool(re.fullmatch('[a-f0-9]{32}',id)),'Identificador inválido.');path=self.store.directory/'respaldos'/('antes-'+id+'.json');check(path.is_file(),'No se encuentra la copia de seguridad previa.');return path.read_bytes()
  def reset(self,data,actor,apply=False):
+  if apply and actor['role']!='superadmin':raise PermissionError('AUXTI necesita aprobación de sistemas para vaciar datos.')
   module=data.get('modulo');self.authorize(actor,module)
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);fingerprint=digest(current);result={'modulo':module,'nombre':MODULES[module],'actual':self.summary(module,current),'huellaActual':fingerprint,'nota':'Se vacían los datos del módulo elegido. Usuarios, otros módulos y máximos de consecutivos/folios se conservan. Se crea una copia automática antes de vaciar.'}

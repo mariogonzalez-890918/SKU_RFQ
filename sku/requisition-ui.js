@@ -1,4 +1,4 @@
-const rqCanWrite=['superadmin','ventas','compras','alta'].includes(currentUser.role),rqCanImport=['superadmin','compras','alta'].includes(currentUser.role);
+const rqCanWrite=['superadmin','auxti','ventas','compras','alta'].includes(currentUser.role),rqCanImport=canLoadMasters&&currentUser.modulos.includes('requisiciones');
 let rqMeta=null,rqMaterials=[],rqLines=[],rqPage=1,rqBusy=false,rqImportPending=null,rqSelectedDoc=null;
 let rqHistoryGeneration=0,rqRefreshGeneration=0;
 const rqNewKey=()=>typeof crypto!=='undefined'&&crypto.getRandomValues?Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join(''):'req_'+Date.now()+'_'+Math.random().toString(36).slice(2)+'_'+Math.random().toString(36).slice(2);

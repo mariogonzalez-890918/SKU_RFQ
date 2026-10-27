@@ -1,10 +1,11 @@
+from permissions import require_module
 """Solicitudes inmutables, maestro independiente y folios atómicos por sucursal."""
 import base64,collections,csv,datetime,decimal,hashlib,html,io,json,pathlib,re,sqlite3,unicodedata,uuid,zipfile,xml.etree.ElementTree as ET
 ROOT=pathlib.Path(__file__).resolve().parent
 MX=datetime.timezone(datetime.timedelta(hours=-6))
 AREAS=['Produccion','Produccion Barra congelada','Produccion Batidos Galletas','Produccion Bizcochero','Produccion Donas','Produccion Franceseros','Produccion Gelatinas','Produccion Limpieza','Produccion Pasteleros','Produccion Punto de Venta San Pablo','Produccion Reposteria','Produccion Rosticeria','Salida Cuautitlan','Salida Ejidos','Almacen rosticeria','Produccion Pan Molido','Produccion Pesadas','Produccion Condimix','Produccion Empacado','Produccion Empacado Armado','Produccion Empacado Congelado','Expendio']
 BRANCHES={'EJIDOS':'REQ-EJI','SAN PABLO':'REQ-SP','CUAUTITLAN':'REQ-CUA','EJE 8':'REQ-E8'}
-MANAGERS={'superadmin','compras','alta'}
+MANAGERS={'superadmin','auxti','compras','alta'}
 SCOPED_ROLES={'gerente','almacenista'}
 READ_ONLY_ROLES={'visualizador','gerente','almacenista'}
 NS={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
@@ -122,7 +123,7 @@ class RequisitionStore:
   for r in result:r['skuRepetido']=bool(r['sku'] and counts[r['sku']]>1)
   return result
  def import_master(self,data,actor):
-  if actor['role'] not in MANAGERS:raise PermissionError('Compras, alta de productos o superadministrador pueden cargar el maestro.')
+  require_module(actor,'requisiciones');require_module(actor,'cargar_maestro')
   filename=text(data.get('archivo',''),200)
   try:raw=base64.b64decode(data.get('contenido',''),validate=True)
   except Exception:raise ValueError('Contenido del maestro inválido.')
@@ -162,7 +163,7 @@ class RequisitionStore:
   with self.store.connect() as db:name,content=db.execute('SELECT filename,content FROM req_masters ORDER BY id DESC LIMIT 1').fetchone()
   return name,base64.b64decode(content)
  def configure(self,data,actor):
-  if actor['role']!='superadmin':raise PermissionError('Solo el superadministrador puede configurar series y folios.')
+  if actor['role'] not in ('superadmin','auxti'):raise PermissionError('Solo administración puede configurar series y folios.')
   branch=data.get('sucursal');series=text(data.get('serie',''),20).upper();number=data.get('siguiente');revision=data.get('revision')
   if branch not in BRANCHES or not re.fullmatch('[A-Z0-9][A-Z0-9-]{1,19}',series) or type(number) is not int or not 1<=number<=999999999 or type(revision) is not int:raise ValueError('Sucursal, serie o siguiente folio inválidos.')
   with self.store.connect() as db:

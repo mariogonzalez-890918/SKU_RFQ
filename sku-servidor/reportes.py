@@ -2,7 +2,7 @@
 import base64,collections,datetime,decimal,json,re,uuid
 from requisiciones import BRANCHES,AREAS,Conflict,norm,now,parse_master,visible_branches,csv_bytes,text
 D=decimal.Decimal
-EDITORS={'superadmin','gerente'}
+EDITORS={'superadmin','auxti','gerente'}
 CENT=D('.01')
 def dec(value,positive=False):
  try:

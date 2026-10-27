@@ -1,3 +1,3 @@
 TITLE='RFQ_SKU_GMP'
-VERSION='1.2.1'
+VERSION='1.3.0'
 SUPPORT_LINE='aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026'

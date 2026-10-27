@@ -1,3 +1,4 @@
+from permissions import require_module
 """Actualización de compras en lote, por PRODUCTOS, sin comparar cada fila contra todo el catálogo."""
 import base64,collections,copy,datetime,io,json,re,time,zipfile,xml.etree.ElementTree as ET
 from requisiciones import Conflict,NS,norm,read_rows,text,now
@@ -35,7 +36,7 @@ def original_fields(master):
 class PurchaseImporter:
  def __init__(self,store,make_sku,validate,protect):self.store=store;self.make_sku=make_sku;self.validate=validate;self.protect=protect
  def run(self,data,actor):
-  if actor['role'] not in ('superadmin','compras','alta'):raise PermissionError('Tu perfil no puede actualizar el maestro de compras.')
+  require_module(actor,'compras');require_module(actor,'cargar_maestro')
   started=time.perf_counter();filename=text(data.get('archivo',''),200)
   try:raw=base64.b64decode(data.get('contenido',''),validate=True)
   except Exception:raise ValueError('Archivo inválido.')

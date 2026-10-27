@@ -13,16 +13,17 @@ from compras import PurchaseImporter,export_products
 from respaldos import BackupStore
 from app_info import TITLE,VERSION,SUPPORT_LINE
 from imagenes import ImageStore
+from aprobaciones_admin import AdminApprovals
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
 ADMIN_EMAIL='sistemas@grupomipan.com'
-ROLES={'superadmin':'SUPERADMINISTRADOR','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA'}
+ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA'}
 def read_scope(actor,scope):
  require_module(actor,scope)
 def write_scope(actor,scope):
  read_scope(actor,scope)
- if actor['role'] not in ('superadmin','alta',scope):raise PermissionError('Tu perfil solo permite consultar este módulo.')
+ if actor['role'] not in ('superadmin','auxti','alta',scope):raise PermissionError('Tu perfil solo permite consultar este módulo.')
 def password_hash(password,salt):return hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),310000).hex()
 def new_password(password):
  if not isinstance(password,str) or not 10<=len(password)<=200:raise ValueError('La contraseña debe tener entre 10 y 200 caracteres.')
@@ -93,6 +94,11 @@ class Store:
    db.execute('CREATE TABLE IF NOT EXISTS user_requisition_access(email TEXT PRIMARY KEY,sucursales TEXT NOT NULL,almacenes TEXT NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS role_modules(role TEXT PRIMARY KEY,modules TEXT NOT NULL,revision INTEGER NOT NULL)')
    for role,modules in DEFAULTS.items():db.execute('INSERT OR IGNORE INTO role_modules VALUES(?,?,1)',(role,json.dumps(modules)))
+   db.execute('CREATE TABLE IF NOT EXISTS permission_features(key TEXT PRIMARY KEY)')
+   if not db.execute("SELECT 1 FROM permission_features WHERE key='capabilities-v1'").fetchone():
+    for role in ('ventas','compras','alta'):
+     row=db.execute('SELECT modules FROM role_modules WHERE role=?',(role,)).fetchone();modules=json.loads(row[0]);modules=list(dict.fromkeys(modules+['cargar_maestro']));db.execute('UPDATE role_modules SET modules=?,revision=revision+1 WHERE role=?',(json.dumps(modules),role))
+    db.execute("INSERT INTO permission_features VALUES('capabilities-v1')")
    db.execute('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,email TEXT NOT NULL,csrf TEXT NOT NULL,expires REAL NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY,count INTEGER NOT NULL,until REAL NOT NULL)')
    if not db.execute('SELECT 1 FROM users WHERE email=?',(ADMIN_EMAIL,)).fetchone():
@@ -168,13 +174,22 @@ class Store:
  def users(self):
   with self.connect() as db:rows=db.execute('SELECT u.email,u.name,u.role,u.active,a.sucursales,a.almacenes FROM users u LEFT JOIN user_requisition_access a ON u.email=a.email ORDER BY u.email').fetchall()
   return [{**dict(zip(('email','name','role','active'),r[:4])),'sucursales':json.loads(r[4] or '[]'),'almacenes':json.loads(r[5] or '[]')} for r in rows]
+ def user_fingerprint(self,db,email):
+  row=db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone();access=db.execute('SELECT * FROM user_requisition_access WHERE email=?',(email,)).fetchone()
+  return hashlib.sha256(json.dumps([row,access],ensure_ascii=False).encode()).hexdigest()
  def manage_user(self,data,actor):
-  if actor['role']!='superadmin':raise PermissionError('Solo el super administrador puede administrar usuarios.')
+  if actor['role'] not in ('superadmin','auxti'):raise PermissionError('Solo administración puede administrar usuarios.')
   email=str(data.get('email','')).strip().lower();name=str(data.get('name','')).strip();role=data.get('role');active=data.get('active',True);password=data.get('password','')
   if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email) or len(email)>160 or not 1<=len(name)<=100 or role not in ROLES or type(active) is not bool:raise ValueError('Correo, nombre o perfil inválido.')
+  if actor['role']=='auxti' and role=='superadmin':raise PermissionError('AUXTI no puede asignar Superadministrador.')
   if email==ADMIN_EMAIL and (role!='superadmin' or not active):raise ValueError('La cuenta de sistemas debe permanecer activa como super administrador.')
-  if email==actor['email'] and (not active or role!='superadmin'):raise ValueError('No puedes quitarte tu acceso de super administrador.')
+  if email==actor['email'] and (not active or role!=actor['role']):raise ValueError('No puedes quitarte tu acceso de super administrador.')
   with self.connect() as db:
+   existing=db.execute('SELECT role FROM users WHERE email=?',(email,)).fetchone()
+   if actor['role']=='auxti':
+    if role=='superadmin' or email==ADMIN_EMAIL or existing and existing[0]=='superadmin':raise PermissionError('AUXTI no puede crear ni modificar cuentas de Superadministrador.')
+    if not active:raise PermissionError('Solicita aprobación de sistemas para desactivar usuarios.')
+   if data.get('_huellaUsuario') and self.user_fingerprint(db,email)!=data['_huellaUsuario']:raise RequisitionConflict('El usuario cambió; solicita una nueva autorización.')
    old=db.execute('SELECT salt,password_hash FROM users WHERE email=?',(email,)).fetchone()
    previous=db.execute('SELECT sucursales,almacenes FROM user_requisition_access WHERE email=?',(email,)).fetchone()
    assigned={}
@@ -199,6 +214,7 @@ def create_handler(store):
  purchases=PurchaseImporter(store,sku,validate,protect)
  images=ImageStore(store,requisitions)
  backups=BackupStore(store,validate,reports)
+ admin_approvals=AdminApprovals(store,sales,images,backups)
  class Handler(http.server.BaseHTTPRequestHandler):
   def auth(self):
    cookie=http.cookies.SimpleCookie()
@@ -233,7 +249,7 @@ def create_handler(store):
     except PermissionError as e:return self.reply(403,{'error':str(e)})
     except ValueError as e:return self.reply(400,{'error':str(e)})
    if path=='/api/perfiles':
-    if actor['role']!='superadmin':return self.reply(403,{'error':'Solo superadministrador.'})
+    if actor['role'] not in ('superadmin','auxti'):return self.reply(403,{'error':'Solo administración.'})
     return self.reply(200,store.profiles())
    if path.startswith('/api/requisiciones'):
     try:
@@ -242,8 +258,8 @@ def create_handler(store):
      if path=='/api/requisiciones/imagenes':return self.reply(200,images.list(actor))
      image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',path)
      if image_match:
-      raw=images.get(int(image_match[1]),thumbnail=query.get('miniatura')==['1']);return self.reply(200,raw,'image/png') if raw is not None else self.reply(404,{'error':'Este material no tiene imagen.'})
-     if path=='/api/requisiciones/reportes':return self.reply(200,{'reportes':reports.definitions(),'puedeEditar':actor['role'] in ('superadmin','gerente')})
+      raw=images.get(int(image_match[1]),thumbnail=query.get('miniatura')==['1']);return self.reply(200,raw,'image/png' if query.get('miniatura')==['1'] else images.content_type(int(image_match[1]))) if raw is not None else self.reply(404,{'error':'Este material no tiene imagen.'})
+     if path=='/api/requisiciones/reportes':return self.reply(200,{'reportes':reports.definitions(),'puedeEditar':actor['role'] in ('superadmin','auxti','gerente')})
      if path=='/api/requisiciones/costos':return self.reply(200,{'costos':reports.costs()})
      if path=='/api/requisiciones/cambios':return self.reply(200,workflow.list(actor))
      history_match=re.fullmatch('/api/requisiciones/([a-f0-9]{32})/historial',path)
@@ -272,13 +288,21 @@ def create_handler(store):
      return self.reply(404,{'error':'No encontrado.'})
     except PermissionError as e:return self.reply(403,{'error':str(e)})
     except ValueError as e:return self.reply(400,{'error':str(e)})
+   if path.startswith('/api/autorizaciones-admin'):
+    try:
+     if path=='/api/autorizaciones-admin':return self.reply(200,admin_approvals.list(actor))
+     match=re.fullmatch('/api/autorizaciones-admin/([a-f0-9]{32})',path)
+     if match:return self.reply(200,admin_approvals.detail(match[1],actor))
+     return self.reply(404,{'error':'No encontrado.'})
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except ValueError as e:return self.reply(400,{'error':str(e)})
    if path=='/api/users':
-    if actor['role']!='superadmin':return self.reply(403,{'error':'Solo el super administrador puede administrar usuarios.'})
+    if actor['role'] not in ('superadmin','auxti'):return self.reply(403,{'error':'Solo administración puede consultar usuarios.'})
     return self.reply(200,{'users':store.users(),'roles':ROLES,'sucursalesDisponibles':list(BRANCHES),'almacenesDisponibles':list(BRANCHES)})
    if path in ('/api/catalogo','/api/ventas','/api/ventas/excel','/api/ventas/respaldo','/api/compras/respaldo'):
     try:
      read_scope(actor,'compras' if path in ('/api/catalogo','/api/compras/respaldo') else 'ventas')
-     if path.endswith('/respaldo') and actor['role']!='superadmin':raise PermissionError('Los respaldos son exclusivos del superadministrador.')
+     if path.endswith('/respaldo') and actor['role'] not in ('superadmin','auxti'):raise PermissionError('Los respaldos son exclusivos del superadministrador.')
      if path=='/api/ventas/excel':return self.reply(200,export_master(sales.get()),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
      return self.reply(200,store.get() if path in ('/api/catalogo','/api/compras/respaldo') else sales.get())
     except PermissionError as e:return self.reply(403,{'error':str(e)})
@@ -287,8 +311,8 @@ def create_handler(store):
    self.reply(404,{'error':'No encontrado.'})
   def read_body(self):
    length=int(self.headers.get('Content-Length','0'))
-   limit=128*1024*1024 if self.path.startswith('/api/respaldos/restaurar') else MAX_BODY
-   if not 0<length<=limit:raise ValueError('Archivo demasiado grande o solicitud vacía.')
+   limit=128*1024*1024 if self.path.startswith(('/api/respaldos/restaurar','/api/autorizaciones-admin')) else MAX_BODY
+   if length<=0 or length>limit and self.path!='/api/requisiciones/imagenes' and not self.path.startswith(('/api/respaldos/restaurar','/api/autorizaciones-admin')):raise ValueError('Archivo demasiado grande o solicitud vacía.')
    data=json.loads(self.rfile.read(length))
    if not isinstance(data,dict):raise ValueError('Solicitud inválida.')
    return data
@@ -308,14 +332,18 @@ def create_handler(store):
     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),actor['csrf']):return self.reply(403,{'error':'Solicitud sin verificación de sesión.'})
     if self.path=='/api/logout' and self.command=='POST':
      store.logout(self.token);return self.reply(200,{'ok':True},cookie='gmp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+    if self.path=='/api/autorizaciones-admin' and self.command=='POST':return self.reply(200,admin_approvals.submit(self.read_body(),actor))
+    admin_decision=re.fullmatch('/api/autorizaciones-admin/([a-f0-9]{32})/resolver',self.path)
+    if admin_decision and self.command=='POST':
+     result=admin_approvals.decide(admin_decision[1],self.read_body(),actor);return self.reply(200 if result['ok'] else 409,result)
     if self.path=='/api/users' and self.command in ('POST','PUT'):
-     if actor['role']!='superadmin':raise PermissionError('Solo el super administrador puede administrar usuarios.')
+     if actor['role'] not in ('superadmin','auxti'):raise PermissionError('Solo administración puede administrar usuarios.')
      store.manage_user(self.read_body(),actor);return self.reply(200,{'users':store.users()})
     if self.path=='/api/perfiles' and self.command=='PUT':return self.reply(200,store.save_profile(self.read_body(),actor))
     if self.path in ('/api/respaldos/restaurar/revisar','/api/respaldos/restaurar/confirmar') and self.command=='POST':return self.reply(200,backups.review(self.read_body(),actor,apply=self.path.endswith('/confirmar')))
     if self.path in ('/api/respaldos/vaciar/revisar','/api/respaldos/vaciar/confirmar') and self.command=='POST':return self.reply(200,backups.reset(self.read_body(),actor,apply=self.path.endswith('/confirmar')))
     if self.path=='/api/compras/importar' and self.command=='POST':
-     write_scope(actor,'compras');return self.reply(200,purchases.run(self.read_body(),actor))
+     read_scope(actor,'compras');require_module(actor,'cargar_maestro');return self.reply(200,purchases.run(self.read_body(),actor))
     if self.path.startswith('/api/requisiciones'):require_module(actor,'requisiciones')
     if self.path=='/api/requisiciones/imagenes' and self.command=='POST':return self.reply(200,images.upload(self.read_body(),actor))
     image_match=re.fullmatch('/api/requisiciones/imagenes/([1-9][0-9]*)',self.path)
@@ -343,7 +371,9 @@ def create_handler(store):
      if result is None:return self.reply(409,{'error':'El catálogo cambió. Actualiza antes de guardar.'})
      return self.reply(200,result)
     if self.path in ('/api/ventas','/api/ventas/importar') and self.command in ('PUT','POST'):
-     write_scope(actor,'ventas')
+     read_scope(actor,'ventas')
+     if self.path.endswith('/importar'):require_module(actor,'cargar_maestro')
+     else:write_scope(actor,'ventas')
      data=self.read_body();result=sales.import_master(data,actor) if self.path.endswith('/importar') else sales.put(data,actor)
      if result is None:return self.reply(409,{'error':'Ventas cambió. Actualiza antes de guardar.'})
      return self.reply(200,result)

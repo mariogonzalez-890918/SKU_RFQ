@@ -1,3 +1,4 @@
+from permissions import require_module
 """Catálogo de ventas independiente: SKU históricos inmutables y sufijo de colisión."""
 import base64,copy,datetime,io,json,pathlib,re,unicodedata,zipfile,xml.etree.ElementTree as ET
 
@@ -131,8 +132,10 @@ class SalesStore:
  def get(self):
   with self.store.connect() as db:rev,payload=db.execute('SELECT revision,payload FROM sales_catalog').fetchone()
   return {**json.loads(payload),'revision':rev,'catalogos':{'TIP':TIP,'CAT':CAT,'SUB':SUB,'PDV':PDV}}
- def transact(self,revision,actor,change):
-  if actor['role'] not in ('superadmin','ventas','alta'):raise PermissionError('Tu perfil no puede modificar ventas.')
+ def transact(self,revision,actor,change,importing=False):
+  require_module(actor,'ventas')
+  if importing:require_module(actor,'cargar_maestro')
+  elif actor['role'] not in ('superadmin','auxti','ventas','alta'):raise PermissionError('Tu perfil no puede modificar ventas.')
   if type(revision) is not int:raise ValueError('Falta la revisión de ventas.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');rev,payload=db.execute('SELECT revision,payload FROM sales_catalog').fetchone()
@@ -175,7 +178,7 @@ class SalesStore:
      if '00' not in (item['tipo'],item['categoria'],item['subcategoria']):assign(state,item)
     state['registros'].append(item)
    validate(new)
-  return self.transact(data.get('revision'),actor,change)
+  return self.transact(data.get('revision'),actor,change,importing=True)
 
 def export_master(data):
  raw,path,xml,rows=read_master(data['master']);by_row={r['fila']:r for r in data['state']['registros'] if r.get('fila')};new_rows=[r for r in data['state']['registros'] if not r.get('fila') and not r['eliminado']]

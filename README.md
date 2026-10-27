@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.2.1
+# RFQ_SKU_GMP · Versión 1.3.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -8,7 +8,11 @@ aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan
 
 Las opciones de cada módulo se eligen en submenús del menú izquierdo. En celular y tablet (hasta 1024 px), el botón de tres líneas abre el menú desplegable; se conserva abierto cuando cambia la altura visible del navegador. Reportes separa consulta, configuración y costos; Respaldos separa descarga, restauración y reinicio.
 
-En Requisiciones → Imágenes por SKU puedes cargar PNG de mínimo 225 × 165 px y máximo 2 MB por archivo. Para cargar varios, nombra cada archivo como `SKU.png`; los SKU deben existir y ser únicos. Para carga individual usa el buscador o filtra **Sin imagen** y pulsa **Cargar imagen**. La carga masiva conserva fotos existentes salvo que actives reemplazar. Superadministrador, Compras y Alta de productos pueden administrar imágenes con acceso al módulo. Las fotos solo aparecen en la búsqueda de materiales de una nueva requisición; si faltan, se muestra el logo GMP. El respaldo de requisiciones incluye imágenes y acepta respaldos anteriores sin fotos.
+En Requisiciones → Imágenes por SKU puedes cargar archivos de imagen válidos (PNG, JPEG, WebP, GIF, BMP, TIFF y otros formatos compatibles con el servidor), sin mínimo de dimensiones ni límite de peso por archivo configurado en el módulo. Para carga masiva, nombra cada archivo como `SKU.png`, `SKU.jpg`, etc.; el SKU debe existir y ser único. También puedes filtrar **Sin imagen** y pulsar **Cargar imagen**. Superadministrador y AUXTI son los únicos perfiles que pueden cargar, cambiar y quitar fotos; pueden hacerlo sin aprobación. Las miniaturas solo aparecen al buscar materiales de una nueva requisición; si faltan fotos, se muestra el logo GMP. El respaldo de requisiciones incluye las imágenes y acepta respaldos anteriores sin fotos.
+
+El perfil **AUXTI** tiene acceso administrativo y puede descargar respaldos. Las bajas de SKU, desactivaciones de usuarios, cancelaciones o eliminación de partidas de requisiciones, vaciado y restauración de módulos requieren autorización de `sistemas@grupomipan.com`. Las solicitudes se revisan en **Autorizaciones → Autorizaciones de AUXTI**; los cambios de requisiciones se revisan en su pestaña correspondiente. Hasta aprobar, los datos se conservan. Se valida que los datos no hayan cambiado y se registra la decisión. AUXTI no puede asignarse Superadministrador, cambiar las cuentas de Superadministrador ni modificar accesos por perfil.
+
+**Accesos por perfil** permite controlar por separado SKU Ventas, SKU Compras, Requisiciones, Imágenes y Cargar maestros. Cargar un maestro requiere tanto acceso al módulo correspondiente como a Cargar maestros. Habilitar Imágenes a otro perfil permite consultar su sección, pero la modificación de fotos permanece reservada a Superadministrador y AUXTI.
 
 ## Descargar EXE
 

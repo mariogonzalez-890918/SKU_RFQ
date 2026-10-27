@@ -1,4 +1,4 @@
-const rpCanEdit=['superadmin','gerente'].includes(currentUser.role);let rpDefinitions=[],rpActive=null,rpResult=null,rpCostRows=[],rpCostEditing=null,rpLoaded=false;
+const rpCanEdit=['superadmin','auxti','gerente'].includes(currentUser.role);let rpDefinitions=[],rpActive=null,rpResult=null,rpCostRows=[],rpCostEditing=null,rpLoaded=false;
 function rpMoney(value,unit=false){if(value===null||value===undefined)return 'Pendiente';const match=String(value).match(/^(\d+)(?:\.(\d*))?$/);if(!match)return '$ '+Number(value).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:unit?6:2});const places=unit?6:2,scale=10n**BigInt(places),fraction=match[2]||'';let digits=BigInt(match[1])*scale+BigInt(fraction.padEnd(places,'0').slice(0,places));if(fraction.length>places&&fraction[places]>='5')digits++;let tail=(digits%scale).toString().padStart(places,'0');if(unit)tail=tail.replace(/0+$/,'').padEnd(2,'0');return '$ '+(digits/scale).toLocaleString('es-MX')+'.'+tail;}
 function rpMessage(value){$('rpMensaje').textContent=value;}
 function rpSelected(id){return [...$(id).selectedOptions].map(o=>o.value);}

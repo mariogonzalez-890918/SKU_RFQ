@@ -1,4 +1,4 @@
-const roleNames={superadmin:'SUPERADMINISTRADOR',visualizador:'VISUALIZADOR',ventas:'VENTAS',compras:'COMPRAS',alta:'ALTA DE PRODUCTOS',gerente:'GERENTE',almacenista:'ALMACENISTA'};
+const roleNames={superadmin:'SUPERADMINISTRADOR',auxti:'AUXTI',visualizador:'VISUALIZADOR',ventas:'VENTAS',compras:'COMPRAS',alta:'ALTA DE PRODUCTOS',gerente:'GERENTE',almacenista:'ALMACENISTA'};
 let userBranchChoices=[],userWarehouseChoices=[],userSelectedLocations=[];
 function renderUserLocations(values=[]){const role=$('usuarioRol').value,restricted=['gerente','almacenista'].includes(role),choices=role==='gerente'?userBranchChoices:userWarehouseChoices;userSelectedLocations=role==='gerente'?[...userBranchChoices]:values.filter(v=>choices.includes(v));$('usuarioAccesos').hidden=!restricted;$('usuarioUbicaciones').replaceChildren();if(!restricted)return;$('usuarioAccesosTitulo').textContent=role==='gerente'?'Sucursales del gerente':'Almacenes que puede consultar';$('usuarioAccesosNota').textContent=role==='gerente'?'Consulta las cuatro sucursales, únicamente en Requisición de materiales. No puede emitir solicitudes ni modificar datos.':'Marca al menos un almacén. Solo podrá consultar requisiciones de los almacenes seleccionados. No podrá emitir solicitudes ni modificar datos.';for(const value of choices){const label=document.createElement('label'),input=document.createElement('input'),name=document.createElement('span');input.type='checkbox';input.checked=userSelectedLocations.includes(value);input.disabled=role==='gerente';input.setAttribute?.('aria-label','Acceso '+value);input.onchange=()=>{userSelectedLocations=input.checked?[...new Set([...userSelectedLocations,value])]:userSelectedLocations.filter(v=>v!==value);};name.textContent=value;label.append(input,name);$('usuarioUbicaciones').append(label);}}
 function userLocationPayload(){const role=$('usuarioRol').value;if(role==='almacenista'&&!userSelectedLocations.length)throw Error('Selecciona al menos un almacén para el almacenista.');return {sucursales:role==='gerente'?[...userBranchChoices]:[],almacenes:role==='almacenista'?[...userSelectedLocations]:[]};}
@@ -6,7 +6,7 @@ $('usuarioRol').onchange=()=>renderUserLocations();
 $('perfil').textContent=currentUser.name+' · '+roleNames[currentUser.role]+' · '+currentUser.email;
 $('nuevo').closest('details').hidden=!canEdit;
 $('listaTexto').closest('details').hidden=!canEdit;
-$('maestroArchivo').closest('details').hidden=!canEdit;
+$('maestroArchivo').closest('details').hidden=!canLoadMasters;
 $('restore').hidden=!canDelete;
 $('usuariosPanel').hidden=!canDelete;
 $('salir').onclick=async()=>{try{await fetch('/api/logout',{method:'POST',headers:{'X-CSRF-Token':currentUser.csrf}});location.assign('/');}catch(err){message(err);}};

@@ -55,17 +55,19 @@ class WorkflowStore:
   db.execute('UPDATE req_documents SET payload=? WHERE id=?',(json.dumps(doc,ensure_ascii=False),doc['id']))
   return doc
  def submit(self,data,actor):
-  if actor['role'] not in EDITORS|{'almacenista'}:raise PermissionError('Solo gerencia, superadministrador o almacenista pueden solicitar estos cambios.')
+  if actor['role'] not in EDITORS|{'almacenista','auxti'}:raise PermissionError('Solo gerencia, superadministrador o almacenista pueden solicitar estos cambios.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');c=self._prepare(db,data,actor);c.update({'id':uuid.uuid4().hex,'fecha':now(),'solicitadoPor':actor['email'],'estado':'PENDIENTE'})
    # Un almacenista siempre espera autorización, incluso si conoce un ID de solicitud.
    result=None
-   if actor['role'] in EDITORS:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Cambio directo de gerencia/superadministrador.'})
+   old=self._document(db,c['objetivo'],actor);removed=c['tipo']=='cancelar' or bool({r['materialId'] for r in old['partidas']}-{r['materialId'] for r in c['datos'].get('partidas',[])})
+   c['requiereSistemas']=actor['role']=='auxti' and removed
+   if actor['role'] in EDITORS or actor['role']=='auxti' and not removed:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Cambio directo de gerencia/superadministrador.'})
    db.execute('INSERT INTO req_changes VALUES(?,?,?,?,?,?)',(c['id'],c['sucursal'],actor['email'],c['estado'],c['fecha'],json.dumps(c,ensure_ascii=False)))
   return {'cambio':c,'documento':result}
  def list(self,actor):
   branches=visible_branches(actor);clauses=['branch IN ('+','.join('?' for _ in branches)+')'];params=list(branches)
-  if actor['role'] not in EDITORS:clauses.append('requester=?');params.append(actor['email'])
+  if actor['role'] not in EDITORS|{'auxti'}:clauses.append('requester=?');params.append(actor['email'])
   with self.store.connect() as db:rows=db.execute('SELECT payload FROM req_changes WHERE '+' AND '.join(clauses)+' ORDER BY created_at DESC,rowid DESC LIMIT 500',params).fetchall()
   return {'cambios':[json.loads(row[0]) for row in rows],'puedeAutorizar':actor['role'] in EDITORS,'limite':500}
  def decide(self,id,data,actor):
@@ -82,9 +84,15 @@ class WorkflowStore:
    if approved:
     # No aprobar propuestas de cuentas inactivas, sin módulo o sin el almacén asignado.
     user=db.execute('SELECT role,active FROM users WHERE email=?',(c['solicitadoPor'],)).fetchone()
-    if not user or not user[1] or user[0]!='almacenista':raise Conflict('El solicitante ya no es un almacenista activo. Rechaza la propuesta.')
-    access=db.execute('SELECT almacenes FROM user_requisition_access WHERE email=?',(c['solicitadoPor'],)).fetchone();modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('almacenista',)).fetchone()
-    if not access or c['sucursal'] not in json.loads(access[0]) or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('El solicitante perdió acceso al almacén o módulo. Rechaza la propuesta.')
+    if c.get('requiereSistemas'):
+     if actor['email']!='sistemas@grupomipan.com':raise PermissionError('Solo sistemas@grupomipan.com puede aprobar eliminaciones de AUXTI.')
+     if not user or not user[1] or user[0]!='auxti':raise Conflict('El solicitante ya no es AUXTI activo. Rechaza la propuesta.')
+     modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('auxti',)).fetchone()
+     if not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('AUXTI perdió acceso al módulo. Rechaza la propuesta.')
+    else:
+     if not user or not user[1] or user[0]!='almacenista':raise Conflict('El solicitante ya no es un almacenista activo. Rechaza la propuesta.')
+     access=db.execute('SELECT almacenes FROM user_requisition_access WHERE email=?',(c['solicitadoPor'],)).fetchone();modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('almacenista',)).fetchone()
+     if not access or c['sucursal'] not in json.loads(access[0]) or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('El solicitante perdió acceso al almacén o módulo. Rechaza la propuesta.')
     result=self._apply(db,c,actor)
    c.update({'estado':'APROBADA' if approved else 'RECHAZADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':comment});db.execute('UPDATE req_changes SET status=?,payload=? WHERE id=?',(c['estado'],json.dumps(c,ensure_ascii=False),id))
   return {'cambio':c,'documento':result}
