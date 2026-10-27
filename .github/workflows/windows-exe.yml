@@ -1,0 +1,36 @@
+name: Compilar y publicar EXE Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'sku-servidor/**'
+      - 'sku/**'
+      - 'tools/**'
+      - 'requirements*.txt'
+      - '.github/workflows/windows-exe.yml'
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements-dev.txt
+      - name: Probar instalación y respaldos
+        run: python -m unittest discover -s tests -v
+      - name: Compilar distribución pública
+        run: python tools/build_public.py --output-dir dist-public
+      - name: Publicar EXE y ZIP en Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-${{ github.run_number }}-${{ github.run_attempt }}"
+          gh release create $tag dist-public/SKU-JAD-Servidor.exe Generador-SKU-GMP-Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Generador SKU GMP - Windows $tag" --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."

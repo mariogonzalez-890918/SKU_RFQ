@@ -2,6 +2,12 @@
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
+## Descargar EXE
+
+Descarga **SKU-JAD-Servidor.exe** o el ZIP desde [Releases](https://github.com/mariogonzalez-890918/SKU_RFQ/releases/latest). La distribución pública no requiere Python e incluye catálogos vacíos. En el primer inicio solicita crear una contraseña; no lleva credenciales incorporadas. Para actualizar un servidor existente, conserva `data/` y `config.json` junto al EXE.
+
+El flujo de GitHub Actions compila y publica los ejecutables automáticamente. También puedes generar una distribución pública local con `python tools/build_public.py --output-dir dist-public` después de instalar `requirements-dev.txt`.
+
 ## Funciones
 
 - SKU de 14 caracteres. Conserva los SKU históricos de ventas.

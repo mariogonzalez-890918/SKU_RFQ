@@ -5,6 +5,7 @@
 !/README.md
 !/requirements.txt
 !/requirements-dev.txt
+!/.github/
 !/sku/
 !/sku-servidor/
 !/tools/
@@ -37,6 +38,7 @@
 !/sku-servidor/public/logo.png
 /tools/*
 !/tools/inicializar.py
+!/tools/build_public.py
 /tests/*
 !/tests/test_public_source.py
 !/tests/test_backup_import.py

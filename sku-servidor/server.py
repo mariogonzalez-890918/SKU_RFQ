@@ -94,7 +94,18 @@ class Store:
    db.execute('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,email TEXT NOT NULL,csrf TEXT NOT NULL,expires REAL NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY,count INTEGER NOT NULL,until REAL NOT NULL)')
    if not db.execute('SELECT 1 FROM users WHERE email=?',(ADMIN_EMAIL,)).fetchone():
-    admin=initial_admin or json.loads((ROOT/'initial-admin.json').read_text(encoding='utf8'))
+    admin=initial_admin
+    if admin is None:
+     seed_admin=ROOT/'initial-admin.json'
+     if seed_admin.exists():admin=json.loads(seed_admin.read_text(encoding='utf8'))
+     else:
+      import getpass
+      print('PRIMER INICIO: define la contraseña de '+ADMIN_EMAIL+'. No hay contraseña predeterminada.',flush=True)
+      while admin is None:
+       password=getpass.getpass('Contraseña nueva (mínimo 10 caracteres): ')
+       if password!=getpass.getpass('Confirma la contraseña: '):print('Las contraseñas no coinciden.',flush=True);continue
+       try:salt,digest=new_password(password);admin={'salt':salt,'password_hash':digest}
+       except ValueError as error:print(str(error),flush=True)
     db.execute('INSERT INTO users VALUES(?,?,?,?,?,1)',(ADMIN_EMAIL,'Sistemas GMP','superadmin',admin['salt'],admin['password_hash']))
  @contextlib.contextmanager
  def connect(self):
