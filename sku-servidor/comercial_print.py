@@ -15,7 +15,7 @@ def document_html(doc,channel):
   subtitle=esc(doc['tipo'])+' '+esc(doc['folio'])+'<p>Cliente: '+esc(customer.get('nombre','Público general'))+'<br>'+esc(customer.get('domicilio',''))+'</p>'
  rows=''.join('<tr><td>'+esc(r['nombre'])+'<small>'+esc(r['sku'])+'</small></td><td>'+esc(r['cantidad'])+' '+esc(r['unidad'])+'</td><td>$'+esc(r['precio'])+'</td><td>$'+esc(r['total'])+'</td></tr>' for r in doc['partidas'])
  css='@page{size:80mm auto;margin:4mm}body{width:72mm;margin:0;font:11px Arial}.logo{width:30mm}h2{font-size:15px}' if ticket else '@page{size:A4;margin:15mm}body{font:13px Arial;max-width:900px;margin:auto}.logo{width:85px;float:right}'
- return ('<!doctype html><html lang="es"><meta charset="utf-8"><title>'+esc(doc['folio'])+'</title><style>'+css+'table{width:100%;border-collapse:collapse}td,th{padding:6px 2px;border-bottom:1px solid #ddd;text-align:left}small{display:block;font-size:.8em}.total{text-align:right;font-weight:bold;font-size:1.3em}.sign{margin-top:35px;border-top:1px solid #555;text-align:center}@media print{button{display:none}}</style><button onclick="window.print()">Imprimir / Guardar PDF</button><header>'+header+'</header><p>'+subtitle+'<br>'+esc(doc['fecha'][:19])+' · '+esc(doc['estado'])+'</p><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table><p>Subtotal $'+esc(doc['base'])+'<br>IVA incluido $'+esc(doc['impuesto'])+'</p><p class="total">TOTAL $'+esc(doc['total'])+'</p>'+('<p>Recibido $'+esc(doc['pago']['recibido'])+' · Cambio $'+esc(doc['pago']['cambio'])+'</p>' if ticket else '<p>'+esc(doc.get('condiciones',''))+'</p>')+'<div class="sign">Recibió / Firma</div></html>').encode()
+ return ('<!doctype html><html lang="es"><meta charset="utf-8"><title>'+esc(doc['folio'])+'</title><style>'+css+'table{width:100%;border-collapse:collapse}td,th{padding:6px 2px;border-bottom:1px solid #ddd;text-align:left}small{display:block;font-size:.8em}.total{text-align:right;font-weight:bold;font-size:1.3em}.sign{margin-top:35px;border-top:1px solid #555;text-align:center}@media print{button{display:none}}</style><button onclick="window.print()">Imprimir / Guardar PDF</button><header>'+header+'</header><p>'+subtitle+'<br>'+esc(doc['fecha'][:19])+' · '+esc(doc['estado'])+'</p><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table><p>Subtotal $'+esc(doc['base'])+'<br>IVA incluido $'+esc(doc['impuesto'])+'</p><p class="total">TOTAL $'+esc(doc['total'])+'</p>'+('<p>Recibido $'+esc(doc['pago']['recibido'])+' · Cambio $'+esc(doc['pago']['cambio'])+'</p>' if ticket and doc.get('modo')!='TICKETS' else '<p>'+esc(doc.get('condiciones',''))+'</p>')+'<div class="sign">Recibió / Firma</div></html>').encode()
 
 COLUMNS={'folio':'Folio','fecha':'Fecha','estado':'Estado','sucursal':'Sucursal','cliente':'Cliente','sku':'SKU','descripcion':'Descripción','cantidad':'Cantidad','unidad':'Unidad','precio':'Precio con IVA','iva':'IVA %','base':'Subtotal','impuesto':'IVA incluido','total':'Total'}
 
@@ -40,7 +40,8 @@ def report_csv(rows):
  # Evita interpretar nombres/códigos como fórmulas al abrir CSV en Excel.
  writer.writerows([[("'"+v) if v.startswith(('=','+','-','@')) else v for v in row] for row in rows]);return ('\ufeff'+out.getvalue()).encode('utf8')
 
-def report_xlsx(rows):
+def report_xlsx(rows,sheet_name="Reporte"):
+ rows=[[str(v) if v is not None else "" for v in row] for row in rows]
  from xml.sax.saxutils import escape
  def column(n):
   value=''
@@ -48,14 +49,14 @@ def report_xlsx(rows):
   return value
  def cell(v,i,j):
   ref=column(j)+str(i)
-  numeric=i>1 and rows[0][j-1] in ('Cantidad','Precio con IVA','IVA %','Subtotal','IVA incluido','Total') and re.fullmatch(r'\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
+  numeric=i>1 and rows[0][j-1] in ('Cantidad','Precio con IVA','IVA %','Subtotal','IVA incluido','Total','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO') and re.fullmatch(r'\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
   return '<c r="'+ref+'"><v>'+v+'</v></c>' if numeric else '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+escape(v)+'</t></is></c>'
  sheet='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join('<row r="'+str(i)+'">'+''.join(cell(v,i,j) for j,v in enumerate(row,1))+'</row>' for i,row in enumerate(rows,1))+'</sheetData></worksheet>'
  out=io.BytesIO()
  with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
   z.writestr('[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
   z.writestr('_rels/.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
-  z.writestr('xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Reporte" sheetId="1" r:id="rId1"/></sheets></workbook>')
+  z.writestr('xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+escape(sheet_name)+'" sheetId="1" r:id="rId1"/></sheets></workbook>')
   z.writestr('xl/_rels/workbook.xml.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');z.writestr('xl/worksheets/sheet1.xml',sheet)
  return out.getvalue()
 

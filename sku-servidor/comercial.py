@@ -162,6 +162,7 @@ class CommercialStore:
   q=query.strip().upper();result=[]
   for sku,p,rev in rows:
    product={'sku':sku,'revision':rev,**json.loads(p)}
+   if channel=='ventasins' and not product.get('institucional',True) or channel=='expendios' and not product.get('expendio'):continue
    if q and q not in (sku+' '+product['nombre']).upper():continue
    if not any((key,sku) in pmap for key in LISTS):continue
    product['precios']={key:pmap[(key,sku)]['precio'] for key in (('PUBLICO',) if channel=='ventasins' else ('RUTA','DESPACHO')) if (key,sku) in pmap};result.append(product)
@@ -186,25 +187,48 @@ class CommercialStore:
  def customers(self,company,actor,channel):
   self.module(actor,channel);self.company(company,actor)
   with self.store.connect() as db:rows=db.execute('SELECT id,revision,payload,creator FROM cm_customers WHERE company=? ORDER BY code',(company,)).fetchall()
-  return {'clientes':[{'id':id,'revision':rev,**json.loads(p)} for id,rev,p,creator in rows if actor['role'] in SUPERVISORS or actor['role']=='expendios' or creator==actor['email']]}
+  return {'clientes':[{'id':id,'revision':rev,**json.loads(p)} for id,rev,p,creator in rows if channel in json.loads(p).get('canales',['ventasins','expendios'])]}
  def save_customer(self,data,actor,channel):
   self.action(actor,channel,'clientes');company=data.get('empresa');self.company(company,actor,True)
   name=text(data.get('nombre',''),200);code=text(data.get('codigo',''),50).upper();id=data.get('id');rev=data.get('revision',0)
-  if not name or not re.fullmatch('[A-Z0-9][A-Z0-9_-]{0,49}',code):raise ValueError('Indica código y nombre del cliente.')
+  if not name:raise ValueError('Indica el nombre del cliente. Su código se asigna automáticamente.')
   value={k:text(data.get(k,''),700 if k in ('domicilio','entrega') else 200) for k in ('nombre','rfc','correo','telefono','domicilio','entrega','condiciones')};value.update({'codigo':code,'activo':data.get('activo',True) is True})
+  if value['correo'] and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',value['correo']):raise ValueError('Correo de cliente inválido.')
   with self.store.connect() as db:
-   db.execute('BEGIN IMMEDIATE');old=db.execute('SELECT company,creator,revision FROM cm_customers WHERE id=?',(id,)).fetchone() if id else None
-   if id and (not old or old[0]!=company or actor['role'] not in SUPERVISORS and old[1]!=actor['email']):raise PermissionError('Cliente no disponible en tu cartera.')
+   db.execute('BEGIN IMMEDIATE');old=db.execute('SELECT company,creator,revision,payload,code FROM cm_customers WHERE id=?',(id,)).fetchone() if id else None
+   if id and (not old or old[0]!=company):raise PermissionError('Cliente no disponible en esta razón social.')
    if (old[2] if old else 0)!=rev:raise Conflict('El cliente cambió.')
+   if old:
+    if code and code!=old[4]:raise ValueError('El código asignado al cliente no se modifica.')
+    code=old[4]
+   else:
+    identity=lambda v:tuple(' '.join(str(v.get(k,'')).upper().split()) for k in ('nombre','rfc','correo','telefono','domicilio'))
+    for p, in db.execute('SELECT payload FROM cm_customers WHERE company=?',(company,)):
+     if identity(json.loads(p))==identity(value):raise Conflict('El cliente ya existe. Abre Editar cliente para actualizarlo.')
+    code=self.next_customer_code(db,company)
+   value['codigo']=code
+   channels=data.get('canales',(json.loads(old[3]).get('canales',['ventasins','expendios']) if old else [channel]))
+   if not isinstance(channels,list) or not channels or set(channels)-CHANNELS:raise ValueError('Selecciona uno o ambos canales del cliente.')
+   previous_channels=set(json.loads(old[3]).get('canales',['ventasins','expendios'])) if old else set()
+   for ch in set(channels)^previous_channels:self.action(actor,ch,'clientes')
+   value['canales']=list(dict.fromkeys(channels))
    if id:db.execute('UPDATE cm_customers SET code=?,revision=revision+1,payload=? WHERE id=?',(code,dumps(value),id))
    else:id=uuid.uuid4().hex;db.execute('INSERT INTO cm_customers VALUES(?,?,?,?,1,?)',(id,company,code,actor['email'],dumps(value)))
    self.audit(db,actor,company,'cliente_guardado',{'id':id})
   return {'ok':True,'id':id}
- def customer(self,db,id,company,actor):
+ def next_customer_code(self,db,company):
+  db.execute("INSERT OR IGNORE INTO cm_sequences VALUES(?,'CLIENTE','CLIENTES',1,6,1)",(company,));number=db.execute("SELECT next FROM cm_sequences WHERE company=? AND kind='CLIENTE'",(company,)).fetchone()[0]
+  while True:
+   if number>999999999:raise ValueError('Se agotó el consecutivo de clientes.')
+   code='CLI'+str(company).zfill(2)+'-'+str(number).zfill(6);number+=1
+   if not db.execute('SELECT 1 FROM cm_customers WHERE company=? AND code=?',(company,code)).fetchone():break
+  db.execute("UPDATE cm_sequences SET next=?,revision=revision+1 WHERE company=? AND kind='CLIENTE'",(number,company));return code
+ def customer(self,db,id,company,actor,channel='ventasins'):
   if not id:return None
   row=db.execute('SELECT payload,company,creator FROM cm_customers WHERE id=?',(id,)).fetchone()
-  if not row or row[1]!=company or actor['role'] not in SUPERVISORS|{'expendios'} and row[2]!=actor['email']:raise PermissionError('Cliente no disponible en esta razón social/cartera.')
+  if not row or row[1]!=company:raise PermissionError('Cliente no disponible en esta razón social.')
   value=json.loads(row[0])
+  if channel not in value.get('canales',['ventasins','expendios']):raise ValueError('El cliente no está habilitado para este canal.')
   if not value.get('activo'):raise ValueError('Cliente inactivo.')
   return {'id':id,**value}
  def save_price(self,data,actor):
@@ -299,14 +323,14 @@ class CommercialStore:
    self.audit(db,actor,company,'caja_guardada',{'id':id})
   return {'ok':True,'id':id}
  def open_session(self,data,actor):
-  self.action(actor,'expendios','caja');company=data.get('empresa');fund=amount(data.get('fondo','0'))
+  self.action(actor,'expendios','caja');company=data.get('empresa');mode='TICKETS' if data.get('modo')=='TICKETS' else 'CAJA';fund=D(0) if mode=='TICKETS' else amount(data.get('fondo','0'))
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');box=self.box(db,data.get('caja'),company,actor,True)
    old=db.execute("SELECT id,operator,payload,revision FROM cm_sessions WHERE box=? AND state='ABIERTA'",(box['id'],)).fetchone()
    if old:
     if old[1]!=actor['email'] and actor['role'] not in SUPERVISORS:raise PermissionError('La caja está abierta por otro usuario.')
     return {'id':old[0],'revision':old[3],**json.loads(old[2])}
-   id=uuid.uuid4().hex;value={'caja':box['id'],'sucursal':box['sucursal'],'operador':actor['email'],'fechaApertura':now(),'fondo':money(fund),'estado':'ABIERTA'}
+   id=uuid.uuid4().hex;value={'caja':box['id'],'sucursal':box['sucursal'],'operador':actor['email'],'fechaApertura':now(),'fondo':money(fund),'estado':'ABIERTA','modo':mode}
    db.execute('INSERT INTO cm_sessions VALUES(?,?,?,?,?,1,?)',(id,company,box['id'],actor['email'],'ABIERTA',dumps(value)));self.audit(db,actor,company,'apertura_caja',{'sesion':id,'fondo':money(fund)})
   return {'id':id,'revision':1,**value}
  def session(self,db,id,company,actor,active=True):
@@ -319,16 +343,19 @@ class CommercialStore:
  def cash_summary(self,db,id):
   session=json.loads(db.execute('SELECT payload FROM cm_sessions WHERE id=?',(id,)).fetchone()[0]);expected=amount(session['fondo']);paid=D(0);refund=D(0)
   for p, in db.execute('SELECT payload FROM cm_documents WHERE session=?',(id,)):
-   doc=json.loads(p);paid+=amount(doc['total'])
+   doc=json.loads(p)
+   if doc.get('modo')=='TICKETS':continue
+   paid+=amount(doc['total'])
    if doc['pago']['metodo']=='EFECTIVO':expected+=amount(doc['total'])
   for p, in db.execute('SELECT payload FROM cm_cash_moves WHERE session=?',(id,)):
    move=json.loads(p);refund+=amount(move['importe'])
    if move['metodo']=='EFECTIVO':expected-=amount(move['importe'])
   return {'fondo':session['fondo'],'cobrado':money(paid),'reembolsado':money(refund),'efectivoEsperado':money(expected)}
  def close_session(self,data,actor):
-  self.action(actor,'expendios','caja');company=data.get('empresa');count=amount(data.get('contado'));note=text(data.get('observaciones',''),1000)
+  self.action(actor,'expendios','caja');company=data.get('empresa');note=text(data.get('observaciones',''),1000)
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');session,box=self.session(db,data.get('sesion'),company,actor)
+   count=D(0) if session.get('modo')=='TICKETS' else amount(data.get('contado'))
    if data.get('revision')!=session['revision']:raise Conflict('La caja cambió. Actualiza para cerrar.')
    summary=self.cash_summary(db,session['id']);value={**session,**summary,'estado':'CERRADA','fechaCierre':now(),'cerradoPor':actor['email'],'contado':money(count),'diferencia':money(count-D(summary['efectivoEsperado'])),'observaciones':note}
    value.pop('id',None);value.pop('revision',None)
@@ -347,14 +374,15 @@ class CommercialStore:
 
  def prepare(self,db,data,actor,channel,company,box=None):
   issuer=self.company(company,actor,True,db);branch=box['sucursal'] if box else data.get('sucursal');self.branch(issuer,branch,actor)
-  customer=self.customer(db,data.get('cliente'),company,actor);lines=data.get('partidas');listing=box['lista'] if box else 'PUBLICO'
+  customer=self.customer(db,data.get('cliente'),company,actor,channel);lines=data.get('partidas');listing=box['lista'] if box else 'PUBLICO'
   if not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Agrega de 1 a 200 partidas.')
   result=[]
   for line in lines:
    sku=line.get('sku');row=db.execute('SELECT payload,revision FROM cm_products WHERE sku=?',(sku,)).fetchone()
    if not row:raise ValueError('SKU no encontrado: '+str(sku))
    product=json.loads(row[0])
-   if not product.get('activo') or channel=='expendios' and not product.get('expendio'):raise ValueError('Producto no disponible para este canal: '+sku)
+   if not product.get('activo') or channel=='expendios' and not product.get('expendio') or channel=='ventasins' and not product.get('institucional',True):raise ValueError('Producto no disponible para este canal: '+sku)
+   if product.get('iva') is None:raise ValueError('Completa el IVA pendiente del producto '+sku+' antes de venderlo.')
    price=db.execute('SELECT payload,revision FROM cm_prices WHERE company=? AND list=? AND sku=? AND customer=?',(company,listing,sku,customer['id'] if customer and channel=='ventasins' else '')).fetchone()
    if not price:price=db.execute('SELECT payload,revision FROM cm_prices WHERE company=? AND list=? AND sku=? AND customer=?',(company,listing,sku,'')).fetchone()
    if not price:raise ValueError('El SKU no tiene precio en la lista de esta razón social: '+sku)
@@ -427,10 +455,10 @@ class CommercialStore:
    if repeat:
     if repeat[1]!=hash:raise Conflict('La clave del cobro ya fue utilizada con otro contenido.')
     return {'ok':True,'repetido':True,'documento':self.document(db,repeat[0],actor,'expendios')}
-   session,box=self.session(db,data.get('sesion'),company,actor);value=self.prepare(db,data,actor,'expendios',company,box);method=data.get('metodo');received=amount(data.get('recibido','0'));total=D(value['total'])
-   if method not in ('EFECTIVO','TARJETA','TRANSFERENCIA'):raise ValueError('Método de pago inválido.')
+   session,box=self.session(db,data.get('sesion'),company,actor);value=self.prepare(db,data,actor,'expendios',company,box);ticket_only=session.get('modo')=='TICKETS' or data.get('soloTicket') is True;method='TICKET' if ticket_only else data.get('metodo');received=D(0) if ticket_only else amount(data.get('recibido','0'));total=D(value['total'])
+   if method not in (('TICKET',) if ticket_only else ('EFECTIVO','TARJETA','TRANSFERENCIA')):raise ValueError('Método de pago inválido.')
    if method=='EFECTIVO' and received<total:raise ValueError('El efectivo recibido es menor al total.')
-   value.update({'tipo':'VENTA','folio':self.next_number(db,company,'TPV:'+box['id']),'folioInterno':self.next_number(db,company,'INT:'+box['id']),'estado':'PAGADA','fecha':now(),'creador':actor['email'],'caja':box['id'],'sesion':session['id'],'ticket':box['ticket'],'pago':{'metodo':method,'recibido':money(received) if method=='EFECTIVO' else value['total'],'cambio':money(received-total) if method=='EFECTIVO' else '0.00'},'reembolso':'NO APLICA'})
+   value.update({'tipo':'VENTA','folio':self.next_number(db,company,'TPV:'+box['id']),'folioInterno':self.next_number(db,company,'INT:'+box['id']),'estado':'EMITIDA' if ticket_only else 'PAGADA','modo':'TICKETS' if ticket_only else 'COBRO','fecha':now(),'creador':actor['email'],'caja':box['id'],'sesion':session['id'],'ticket':box['ticket'],'pago':{'metodo':method,'recibido':'0.00' if ticket_only else money(received) if method=='EFECTIVO' else value['total'],'cambio':money(received-total) if method=='EFECTIVO' else '0.00'},'reembolso':'NO APLICA'})
    db.execute('UPDATE cm_sessions SET revision=revision+1 WHERE id=?',(session['id'],))
    return self.persist(db,value,actor,'expendios',key,hash)
  def request_cancel(self,data,actor):
@@ -438,7 +466,7 @@ class CommercialStore:
   if not reason:raise ValueError('Indica el motivo de cancelación.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');doc=self.document(db,data.get('id'),actor,'expendios')
-   if doc['estado']!='PAGADA':raise ValueError('Solo se puede solicitar cancelación de ventas pagadas.')
+   if doc['estado'] not in ('PAGADA','EMITIDA'):raise ValueError('Solo se puede solicitar cancelación de ventas o tickets emitidos.')
    if doc['revision']!=data.get('revision'):raise Conflict('La venta cambió.')
    id=uuid.uuid4().hex;value={'folio':self.next_number(db,doc['empresa'],'CANCELACION'),'documento':doc['id'],'folioVenta':doc['folio'],'motivo':reason,'solicitante':actor['email'],'fecha':now(),'revisionDocumento':doc['revision']}
    db.execute('INSERT INTO cm_cancellations VALUES(?,?,?,?,?,1,?)',(id,doc['empresa'],doc['id'],actor['email'],'PENDIENTE',dumps(value)));self.audit(db,actor,doc['empresa'],'cancelacion_solicitada',value)
@@ -460,8 +488,8 @@ class CommercialStore:
    if not row:raise ValueError('Solicitud no encontrada.')
    if row[2]!='PENDIENTE' or row[3]!=data.get('revision'):raise Conflict('La solicitud ya cambió.')
    value=json.loads(row[4]);doc=self.document(db,row[1],actor,'expendios')
-   if doc['revision']!=value['revisionDocumento'] or doc['estado']!='PAGADA':raise Conflict('La venta cambió. Revisa la solicitud.')
-   if approve:self.persist(db,{**doc,'estado':'CANCELADO','cancelacion':{'autor':actor['email'],'fecha':now(),'motivo':value['motivo'],'solicitud':data['id']},'reembolso':'PENDIENTE'},actor,'expendios','','',doc)
+   if doc['revision']!=value['revisionDocumento'] or doc['estado'] not in ('PAGADA','EMITIDA'):raise Conflict('La venta cambió. Revisa la solicitud.')
+   if approve:self.persist(db,{**doc,'estado':'CANCELADO','cancelacion':{'autor':actor['email'],'fecha':now(),'motivo':value['motivo'],'solicitud':data['id']},'reembolso':'NO APLICA' if doc.get('modo')=='TICKETS' else 'PENDIENTE'},actor,'expendios','','',doc)
    value.update({'resueltoPor':actor['email'],'resuelto':now(),'observaciones':text(data.get('observaciones',''),1000)})
    db.execute('UPDATE cm_cancellations SET state=?,revision=revision+1,payload=? WHERE id=?',('APROBADA' if approve else 'RECHAZADA',dumps(value),data['id']));self.audit(db,actor,row[0],'cancelacion_resuelta',{'id':data['id'],'aprobada':approve})
   return {'ok':True}

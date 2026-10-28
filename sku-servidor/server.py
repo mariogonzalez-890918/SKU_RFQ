@@ -214,6 +214,7 @@ class Store:
 def create_handler(store):
  commercial=CommercialAPI(store)
  sales=SalesStore(store)
+ commercial.sync.apply_initial()
  requisitions=RequisitionStore(store)
  reports=ReportStore(store,requisitions)
  workflow=WorkflowStore(store,requisitions,reports)

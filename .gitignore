@@ -80,3 +80,7 @@
 !/tests/test_commercial.py
 
 !/tests/commercial_browser_regression.mjs
+
+!/tests/test_commercial_catalogs.py
+!/sku-servidor/public/layout-clientes.xlsx
+!/sku-servidor/public/layout-productos.xlsx

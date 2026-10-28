@@ -1,8 +1,8 @@
-# RFQ_SKU_GMP 2.0.0
+# RFQ_SKU_GMP 2.1.0
 
-La versión 2.0.0 corrige el bloqueo de la interfaz comercial al acceder por IP mediante HTTP: las claves de envío utilizan `crypto.getRandomValues`, disponible en ese contexto, en lugar de `crypto.randomUUID`, que requiere un contexto seguro. Los dos accesos a Pedidos institucionales y Expendios/TPV aparecen al principio de Inicio y en la sección de módulos del menú. Se mantienen las restricciones por perfil, razón social, sucursal y caja.
+La versión 2.1.0 corrige el bloqueo de la interfaz comercial al acceder por IP mediante HTTP: las claves de envío utilizan `crypto.getRandomValues`, disponible en ese contexto, en lugar de `crypto.randomUUID`, que requiere un contexto seguro. Los dos accesos a Pedidos institucionales y Expendios/TPV aparecen al principio de Inicio y en la sección de módulos del menú. Se mantienen las restricciones por perfil, razón social, sucursal y caja.
 
-Versión 2.0.0 para instalar en el servidor. El proceso de compilación no sustituye automáticamente el servicio instalado. Los módulos comerciales comparten usuarios, sesión y SQLite con RFQ_SKU_GMP. Los catálogos SKU y las requisiciones mantienen sus rutas y reglas.
+Versión 2.1.0 para instalar en el servidor. El proceso de compilación no sustituye automáticamente el servicio instalado. Los módulos comerciales comparten usuarios, sesión y SQLite con RFQ_SKU_GMP. Los catálogos SKU y las requisiciones mantienen sus rutas y reglas.
 
 ## Razones sociales y sucursales
 
@@ -51,3 +51,15 @@ No se incluyen contabilidad, CFDI, conciliación bancaria, funcionamiento sin co
 ## Verificación
 
 Pruebas HTTP con base temporal y productos ficticios en `tests/test_commercial.py`: permisos por empresa/sucursal, gestión exclusiva de razones sociales, revisión concurrente, precios negociados, folios, idempotencia, IVA, cancelaciones, reembolsos, impresión sin datos fiscales, exportación y programación de 12 horas. Se ejecuta también la batería previa y la regresión del menú móvil.
+
+## Novedades de 2.1.0
+
+Clientes: layouts descargables, importación con vista previa y validación, códigos automáticos por razón social, edición de datos y canales, exportación Excel. Se conservan los códigos existentes y se detectan duplicados antes de aplicar.
+
+Productos: layout SUGERIDO con selección opcional de canal en W, alta manual con SKU automático, edición y exportación Excel. Se permite institucionales, expendios o ambos. Los precios ausentes y el IVA sin definir quedan pendientes, sin convertirlos a cero ni permitir su venta. Se conservan los SKU validados y precios manuales.
+
+Expendios: apertura de sesión para emitir tickets sin solicitar fondo ni registrar cobros. Los tickets no muestran recibido/cambio. Los movimientos anteriores conservan su tratamiento financiero y las cancelaciones mantienen sus permisos.
+
+El maestro puede actualizarse manualmente, desde una descarga autorizada de OneDrive o desde una ruta XLSX del servidor. La programación opcional es cada 12 horas. Una página de vista previa que requiera autorización de Microsoft no garantiza acceso de descarga.
+
+Para activar esta versión en una instalación existente, detener el ejecutable anterior, conservar data y config.json, reemplazar el EXE y reiniciarlo. La publicación en GitHub no actualiza automáticamente el servidor.

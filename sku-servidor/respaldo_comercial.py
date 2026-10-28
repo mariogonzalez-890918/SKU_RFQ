@@ -31,7 +31,7 @@ def validate(db,data):
  for r in companies.values():
   v=json.loads(r['payload']);check(type(r['id']) is int and r['id']>0 and isinstance(v.get('nombre'),str) and isinstance(v.get('sucursales'),list) and all(b in BRANCHES for b in v['sucursales']),'Razón social inválida.')
  for sku,r in products.items():
-  p=json.loads(r['payload']);check(re.fullmatch('[A-Z0-9]{14}',sku) and p.get('nombre') and p.get('unidad') and amount(p.get('iva')) in (0,8,16),'Producto comercial inválido.')
+  p=json.loads(r['payload']);check(re.fullmatch('[A-Z0-9]{14}',sku) and p.get('nombre') and p.get('unidad') and (p.get('iva') is None or amount(p.get('iva')) in (0,8,16)),'Producto comercial inválido.')
  for r in dictionaries(data,'cm_prices'):
   check(r['sku'] in products and r['list'] in ('PUBLICO','RUTA','DESPACHO'),'Precio sin producto/lista.');amount(json.loads(r['payload'])['precio'])
   if r['customer']:check(r['customer'] in customers and customers[r['customer']]['company']==r['company'],'Precio de cliente de otra empresa.')

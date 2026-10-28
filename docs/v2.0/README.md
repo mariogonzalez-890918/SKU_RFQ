@@ -1,6 +1,6 @@
 # RFQ_SKU_GMP v2.0 — candidata de integración
 
-**Estado actual:** versión **2.0.0** para servidor. Consulta [IMPLEMENTACION.md](IMPLEMENTACION.md). Incluye la corrección de acciones por HTTP/IP, dos accesos al principio de Inicio, pantallas distintas de Pedidos institucionales y TPV, y respaldo/restauración comercial. Las razones sociales y sus vínculos con las cuatro sucursales los administran únicamente AUXTI y Superadministrador. La sincronización es cada 12 horas y manual, con descarga autorizada del Excel.
+**Estado actual:** versión **2.1.0** para servidor. Consulta [IMPLEMENTACION.md](IMPLEMENTACION.md). Incluye la corrección de acciones por HTTP/IP, dos accesos al principio de Inicio, pantallas distintas de Pedidos institucionales y TPV, y respaldo/restauración comercial. Las razones sociales y sus vínculos con las cuatro sucursales los administran únicamente AUXTI y Superadministrador. La sincronización es cada 12 horas y manual, con descarga autorizada del Excel.
 
 El resto de este documento conserva el análisis inicial y sus propuestas; no representa una lista de funciones terminadas. Las instrucciones posteriores del usuario y IMPLEMENTACION.md prevalecen.
 
