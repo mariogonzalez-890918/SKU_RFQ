@@ -72,3 +72,9 @@
 /docs/v2.0/*
 !/docs/v2.0/*.md
 !/docs/v2.0/prototipo.html
+
+!/sku/commercial.css
+!/sku-servidor/public/commercial.html
+!/sku-servidor/public/commercial.js
+!/sku-servidor/public/commercial.css
+!/tests/test_commercial.py

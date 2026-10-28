@@ -1,4 +1,6 @@
-# RFQ_SKU_GMP · Versión 1.8.0
+# RFQ_SKU_GMP · Versión 2.0.0-rc1
+
+Candidata de revisión de los módulos VentasIns y Expendios. Consulta [instalación y alcance de v2](docs/v2.0/IMPLEMENTACION.md). La rama principal conserva la versión estable mientras se revisa esta integración.
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 

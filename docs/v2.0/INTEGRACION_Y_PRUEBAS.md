@@ -1,3 +1,5 @@
+> Documento de diseño previo. El alcance implementado y las decisiones posteriores del usuario se encuentran en [IMPLEMENTACION.md](IMPLEMENTACION.md). Razones sociales dinámicas: solo AUXTI y Superadministrador administran sus vínculos con las cuatro sucursales.
+
 # Integración técnica, entrega y aceptación
 
 ## Base inspeccionada
@@ -24,23 +26,24 @@ Extender la misma `data/sku.sqlite3` con tablas comerciales normalizadas, claves
 
 | Entidad | Responsabilidad |
 | --- | --- |
+| `companies`, `company_products` | Tres emisores capturados por el usuario y disponibilidad comercial del SKU por razón social/canal. |
 | `commercial_products` | ID comercial durable, SKU único/inmutable, vínculo al registro SKU, unidad y atributos de venta. El ID comercial no depende del número de fila de Excel ni de un ID de catálogo recreado por un reinicio. |
-| `commercial_customers`, `customer_access` | Clientes y asignaciones/cartera, con referencias comerciales estables. |
-| `price_lists`, `price_rule_versions`, `price_list_access` | Listas, reglas versionadas y alcance por canal/sucursal/caja/cliente. |
+| `commercial_customers`, `customer_company`, `customer_access` | Clientes y asignaciones/cartera, con referencias comerciales estables. |
+| `price_lists`, `price_rule_versions`, `price_list_access` | Listas y reglas versionadas por razón social, canal, sucursal/caja y cliente; IVA 0/8/16 % congelado en líneas. |
 | `quote_templates`, `quote_template_lines` | Plantillas y secciones/notas, versionadas. |
 | `sales_documents`, `sales_lines`, `sales_revisions` | Presupuesto/pedido, referencias entre documentos y snapshots de cada línea. |
 | `pos_configs`, `pos_sessions`, `pos_orders`, `pos_lines`, `pos_payments`, `cash_movements` | Caja, sesión, venta, cobros y conciliación; separar importes cobrados de efectivo recibido/cambio. |
 | `commercial_targets` | Metas comerciales, únicamente si se confirma ese alcance. |
-| `commercial_user_access`, `role_capabilities` | Sucursales, cajas/carteras y capacidades comerciales. No sobrecargar `user_requisition_access`. |
-| `commercial_approvals`, `commercial_audit`, `commercial_sequences` | Excepciones, historial y folios por tipo/sucursal/caja, sin reutilización. |
+| `commercial_user_access`, `role_capabilities` | Razones sociales, sucursales, cajas/carteras y capacidades comerciales. No sobrecargar `user_requisition_access`. |
+| `commercial_approvals`, `commercial_audit`, `commercial_sequences` | Excepciones, historial y folios por emisor/tipo/sucursal/caja, sin reutilización; inicial institucional configurable y folio interno de Expendios. |
 
-Productos, precios, impuestos, moneda, unidad, cliente y condiciones utilizados se congelan en el documento confirmado. Los cambios posteriores del maestro no recalculan ventas pagadas. Mantener importes con `Decimal`/texto decimal canónico, nunca `float` como valor de negocio. Guardar fecha del servidor y fecha de negocio/sesión según regla declarada; no permitir editar la fecha original para alterar indicadores.
+Razón social emisora, productos, precios, IVA 0/8/16 %, moneda, unidad, cliente y condiciones utilizados se congelan en el documento confirmado. Los cambios posteriores del maestro no recalculan ventas pagadas. Mantener importes con `Decimal`/texto decimal canónico, nunca `float` como valor de negocio. Guardar fecha del servidor y fecha de negocio/sesión según regla declarada; no permitir editar la fecha original para alterar indicadores.
 
 ### Capacidades y rutas propuestas
 
 `comercial_ventasins` y `expendios` son módulos distintos del actual `ventas`. Capacidades propuestas: `consultar`, `presupuestar`, `confirmar_pedido`, `operar_caja`, `reportes`, `importar_productos`, `importar_layout`, `administrar_precios`, `autorizar_excepciones`. **Ver Expendios / Punto de Venta** se edita por perfil; sucursales/cajas se asignan por usuario. Solo Superadministrador cambia la matriz, como en el sistema actual.
 
-Rutas nuevas bajo `/api/comercial/...` y `/api/expendios/...`; por ejemplo presupuestos/confirmar, pedidos, productos, listas, cajas, sesiones/abrir, ventas/cobrar y reportes. Cada ruta y descarga valida sesión, módulo, capacidad, alcance y revisión. No basta que un botón esté oculto. Las impresiones consultan el documento ya autorizado por ID; no aceptan un total arbitrario enviado por el cliente.
+Rutas nuevas bajo `/api/comercial/...` y `/api/expendios/...`; por ejemplo presupuestos/confirmar, pedidos, productos, listas, cajas, sesiones/abrir, ventas/cobrar y reportes. Cada ruta y descarga valida sesión, módulo, capacidad, razón social, alcance y revisión. Cancelar Expendios requiere además rol AUXTI o Superadministrador; Gerencia queda excluida. No basta que un botón esté oculto. Las impresiones consultan el documento ya autorizado por ID; no aceptan un total arbitrario enviado por el cliente.
 
 ### Transacciones y concurrencia
 
@@ -72,7 +75,7 @@ No se deducen existencias ni costos de productos terminados a partir de requisic
 | D | Expendios/TPV, caja, pagos y ticket Bixolon. | Cobro único, cierre conciliado y piloto físico de impresión. |
 | E | Dashboard, metas aprobadas, exportaciones, migración y EXE 2.0. | Restauración/migración y regresiones completas, más aceptación por sucursal piloto. |
 
-No se asigna una fecha o duración sin acordar las reglas de negocio y conocer los volúmenes.
+Se agrega un [presupuesto preliminar de 200–320 horas efectivas](ESTIMACION.md) para el alcance completo, incluidos tres emisores, clientes, IVA y cancelaciones. No constituye una fecha comprometida; se revisa con los volúmenes y el primer piloto.
 
 ## Criterios de aceptación para implementación
 
@@ -80,6 +83,10 @@ No se asigna una fecha o duración sin acordar las reglas de negocio y conocer l
 | --- | --- |
 | Integración | Un inicio de sesión y el mismo EXE. SKU y requisiciones de 1.8.0 siguen funcionando, incluido costeo real, autorizaciones y Bixolon. |
 | Expendios por perfil | Deshabilitar su checkbox oculta la aplicación y devuelve denegación en API, impresión, exportación y apertura directa de caja. Habilitar solo consulta no permite cobrar. |
+| Multirrazón | Tres emisores vacíos capturados por el usuario; pedidos/cajas/folios/impresión aislados; consolidado solo de emisores autorizados y sin mezclar monedas. |
+| IVA | Probar 0/8/16 % mixtos, precios incluidos/excluidos y descuentos: base 300.00 + IVA 24.00 = total 324.00 en el caso de prueba. |
+| Folios y cancelación | Inicio institucional elegido, folio interno y solicitud en Expendios; AUXTI/Superadministrador autorizan, Gerencia no; preservar caja hasta registrar devolución real. |
+| Clientes y exportación | Alta y direcciones por cartera/emisor; seleccionar columnas, guardar plantillas y exportar todas las filas del filtro sin recuperar accesos revocados. |
 | Alcances | Un usuario de EJIDOS no ve ni opera cajas/tickets de SAN PABLO. Un VentasIns no accede a documentos de otra cartera mediante IDs o exportaciones. Requisición no obtiene costos comerciales. |
 | Precios | Mismo SKU con precio distinto por canal/sucursal/cliente/vigencia; servidor selecciona regla; cambio de precio no modifica un ticket histórico. Precio faltante bloquea cobro. |
 | Importación | SKU con ceros intactos, duplicados/ambigüedades detectados, vista previa obligatoria, cambios concurrentes rechazados y ningún borrado por omisión de filas. |

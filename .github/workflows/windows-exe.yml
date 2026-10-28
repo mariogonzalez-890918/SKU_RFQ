@@ -2,7 +2,7 @@ name: Compilar y publicar EXE Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, codex/v2-ventasins-expendios]
     paths:
       - 'sku-servidor/**'
       - 'sku/**'
@@ -35,5 +35,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "windows-${{ github.run_number }}-${{ github.run_attempt }}"
-          gh release create $tag dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe Generador-SKU-GMP-Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RFQ_SKU_GMP v1.8.0 - Windows $tag" --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
+          $releaseOptions = @()
+          if ("${{ github.ref_name }}" -ne "main") { $releaseOptions += "--prerelease" }
+          gh release create $tag dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe Generador-SKU-GMP-Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RFQ_SKU_GMP v2.0.0-rc1 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
 

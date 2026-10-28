@@ -14,11 +14,12 @@ from respaldos import BackupStore
 from app_info import TITLE,VERSION,SUPPORT_LINE
 from imagenes import ImageStore
 from aprobaciones_admin import AdminApprovals
+from comercial_routes import CommercialAPI
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
 ADMIN_EMAIL='sistemas@grupomipan.com'
-ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN'}
+ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventasins':'VentasIns','expendios':'Expendios'}
 def read_scope(actor,scope):
  require_module(actor,scope)
 def write_scope(actor,scope):
@@ -211,6 +212,7 @@ class Store:
    db.execute('INSERT INTO user_requisition_access VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET sucursales=excluded.sucursales,almacenes=excluded.almacenes',(email,json.dumps(assigned['sucursales']),json.dumps(assigned['almacenes'])))
    if password or not active:db.execute('DELETE FROM sessions WHERE email=?',(email,))
 def create_handler(store):
+ commercial=CommercialAPI(store)
  sales=SalesStore(store)
  requisitions=RequisitionStore(store)
  reports=ReportStore(store,requisitions)
@@ -239,6 +241,17 @@ def create_handler(store):
     name='index.html' if actor else 'login.html';return self.reply(200,(ROOT/'public'/name).read_bytes(),'text/html; charset=utf-8')
    if not actor:return self.reply(401,{'error':'Inicia sesión para continuar.'})
    if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES,'app':{'titulo':TITLE,'version':VERSION,'soporte':SUPPORT_LINE}})
+   if path in ('/comercial','/commercial.js','/commercial.css'):
+    if not any(m in enabled_modules(actor) for m in ('ventasins','expendios')):return self.reply(403,{'error':'Módulo comercial no habilitado.'})
+    file,kind={'/comercial':('commercial.html','text/html'),'/commercial.js':('commercial.js','text/javascript'),'/commercial.css':('commercial.css','text/css')}[path]
+    return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
+   if path.startswith('/api/comercial/'):
+    try:
+     result=commercial.get(path,parse_qs(urlsplit(self.path).query),actor)
+     return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except RequisitionConflict as e:return self.reply(409,{'error':str(e)})
+    except (ValueError,KeyError,TypeError) as e:return self.reply(400,{'error':str(e)})
    if path.startswith('/api/respaldos'):
     try:
      previous=re.fullmatch('/api/respaldos/previo/([a-f0-9]{32})',path)
@@ -344,6 +357,9 @@ def create_handler(store):
     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),actor['csrf']):return self.reply(403,{'error':'Solicitud sin verificación de sesión.'})
     if self.path=='/api/logout' and self.command=='POST':
      store.logout(self.token);return self.reply(200,{'ok':True},cookie='gmp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+    if self.path.startswith('/api/comercial/') and self.command=='POST':
+     result=commercial.mutate(self.path,self.read_body(),actor)
+     return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
     if self.path=='/api/autorizaciones-admin' and self.command=='POST':return self.reply(200,admin_approvals.submit(self.read_body(),actor))
     admin_decision=re.fullmatch('/api/autorizaciones-admin/([a-f0-9]{32})/resolver',self.path)
     if admin_decision and self.command=='POST':
@@ -400,6 +416,7 @@ def create_handler(store):
    except (ValueError,KeyError,TypeError) as e:self.reply(400,{'error':str(e)})
    except Exception:self.reply(500,{'error':'No se pudo guardar. Revisa el registro del servidor.'})
   def log_message(self,fmt,*args):print(self.address_string(),fmt%args,flush=True)
+ Handler.commercial=commercial
  return Handler
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--host',default='0.0.0.0');parser.add_argument('--port',type=int);parser.add_argument('--data-dir',default=str(APP_DIR/'data'));args=parser.parse_args()
@@ -409,7 +426,8 @@ def main():
  if 'password' in config or 'user' in config:
   config={k:v for k,v in config.items() if k not in ('password','user')};configpath.write_text(json.dumps(config,indent=2),encoding='utf8')
  port=args.port or config.get('port',8080);store=Store(args.data_dir)
- server=http.server.ThreadingHTTPServer((args.host,port),create_handler(store));server.daemon_threads=True
+ handler=create_handler(store);handler.commercial.sync.start()
+ server=http.server.ThreadingHTTPServer((args.host,port),handler);server.daemon_threads=True
  print(f'\n{TITLE} v{VERSION}\n{SUPPORT_LINE}\nPuerto: {port}\nLocal: http://127.0.0.1:{port}\nRed/VPN: http://IP-DEL-SERVIDOR:{port}\nSuperadministrador: {ADMIN_EMAIL}\nInicia sesión con la contraseña configurada.\nDatos: {store.path}\nCtrl+C para detener.\n',flush=True)
  try:server.serve_forever()
  except KeyboardInterrupt:pass

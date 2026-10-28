@@ -1,6 +1,8 @@
-# RFQ_SKU_GMP v2.0 — revisión de integración
+# RFQ_SKU_GMP v2.0 — candidata de integración
 
-**Estado:** análisis para revisión, 28 de octubre de 2026. No implementa módulos ni cambia el EXE 1.8.0.
+**Estado actual:** candidata **2.0.0-rc1** implementada para revisión. Consulta [IMPLEMENTACION.md](IMPLEMENTACION.md) para activación, funciones terminadas y límites. Las razones sociales son dinámicas: solo AUXTI y Superadministrador administran sus datos y vínculos con las cuatro sucursales. La sincronización es cada **12 horas** y manual; requiere una descarga autorizada del Excel. La rama principal conserva la versión estable hasta revisar la candidata.
+
+El resto de este documento conserva el análisis inicial y sus propuestas; no representa una lista de funciones terminadas. Las instrucciones posteriores del usuario y IMPLEMENTACION.md prevalecen.
 
 Se integrarán **VentasIns** y **Expendios** en el mismo RFQ_SKU_GMP, con sus usuarios, catálogo de venta, presupuestos, pedidos, listas de precios y dashboard. El **Punto de Venta pertenece a Expendios**; su visibilidad se asignará en Accesos por perfil. La referencia visual final solicitada es **Odoo Enterprise 14**, que sustituye a Odoo 19 como objetivo de estos módulos.
 
@@ -10,12 +12,18 @@ Se integrarán **VentasIns** y **Expendios** en el mismo RFQ_SKU_GMP, con sus us
 2. [Layouts propuestos de carga](LAYOUTS.md).
 3. [Integración, etapas y criterios de aceptación](INTEGRACION_Y_PRUEBAS.md).
 4. [Prototipo navegable](prototipo.html): abrir el archivo local en el navegador. Simula perfiles, visibilidad de Expendios, presupuestos, caja y formatos de impresión. Usa datos ficticios, no guarda operaciones y no se conecta al servidor. Los botones de impresión muestran la propuesta; imprimir exige pulsar el botón correspondiente.
-5. [Fuentes y alcance de la comparación con Odoo 14](FUENTES.md).
+5. [Tres razones sociales, clientes, IVA, folios y cancelaciones](MULTIRAZON_CLIENTES_REPORTES.md).
+6. [Presupuesto de tiempo por etapas](ESTIMACION.md).
+7. [Fuentes y alcance de la comparación con Odoo 14](FUENTES.md).
 
 ## Decisiones propuestas
 
 | Tema | Propuesta para v2.0 |
 | --- | --- |
+| Razones sociales | Tres emisores capturados por el usuario; separación por emisor de pedidos, cajas, listas, permisos y reportes. |
+| IVA | 0 %, 8 % y 16 % por producto/partida; precios con o sin IVA incluido. |
+| Folios institucionales | Serie y folio inicial elegidos por el usuario; no reutilizar los ya emitidos. |
+| Cancelación Expendios | Solicitud con folio interno; solo AUXTI y Superadministrador autorizan, no Gerencia. |
 | Integración | Una aplicación, autenticación y base de datos compartidas; módulos comerciales separados de los generadores SKU. |
 | Perfiles nuevos | Etiquetas **Expendios** y **VentasIns**, claves internas `expendios` y `ventasins`. No se crean cuentas ni contraseñas en este análisis. |
 | Acceso al TPV | Superadministrador asigna **Ver Expendios / Punto de Venta** por perfil. Ver no concede operar caja ni modificar precios. |
@@ -28,13 +36,15 @@ Se integrarán **VentasIns** y **Expendios** en el mismo RFQ_SKU_GMP, con sus us
 
 ## Pendiente de confirmar durante la revisión
 
-- Significado comercial de **VentasIns**: se conserva literalmente el nombre solicitado, sin asumir “insumos” o “institucional”.
+- **VentasIns** se identifica como pedidos institucionales conforme a la precisión posterior del usuario. Falta definir cartera, condiciones y listas concretas.
 - Referencia visual de la instalación Enterprise 14 utilizada: tema, personalizaciones y capturas de lista, formulario, TPV y documento impreso. Las fuentes públicas verifican la base 14.0; no prueban equivalencia exacta con una instalación Enterprise personalizada.
 - Layout empresarial real: hojas, encabezados, campos obligatorios y datos de muestra anonimizados. Los esquemas adjuntos son una propuesta, no una plantilla ya compatible con el importador actual.
 - Listas autorizadas, impuestos/precios incluidos, descuentos máximos, pagos, cajas, tratamiento de anticipos y responsables de cierres.
 - Tamaño documental predeterminado (Carta propuesto, A4 alternativo), condiciones comerciales, logo y textos de firma/pie.
 
 Estas decisiones no bloquean la revisión del diseño. Ninguna se considera aprobada por el mero hecho de abrir este PR. El siguiente paso será incorporar los comentarios y después implementar por etapas; este PR no despliega v2.0.
+
+La ampliación multirrazón, clientes, IVA y cancelaciones está especificada en el documento adicional; el prototipo conserva la simulación inicial y aún no reproduce esos formularios completos. Estimación de planificación para la v2.0 completa: **200–320 horas efectivas**, con supuestos y entrega piloto detallados en [ESTIMACION.md](ESTIMACION.md).
 
 ## Validación del análisis
 

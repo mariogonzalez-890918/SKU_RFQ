@@ -17,6 +17,9 @@ Consulta: **2026-10-28**. Se revisó primero 19.0 y, al precisar el usuario la v
 | O9 | [Reportes TPV](https://github.com/odoo/documentation/blob/14.0/content/applications/sales/point_of_sale/reporting.rst) | Acceso a análisis desde Informes y desde el dashboard. |
 | O10 | [Referencia visual pública del TPV](https://github.com/odoo/documentation/blob/14.0/content/applications/sales/point_of_sale/pos-interface.png) | Imagen de interfaz incluida en la documentación 14.0; para cotejo de distribución de caja y productos. |
 
+| O11 | [Formulario de empresas](https://github.com/odoo/odoo/blob/14.0/odoo/addons/base/views/res_company_views.xml), [contactos](https://github.com/odoo/odoo/blob/14.0/odoo/addons/base/views/res_partner_views.xml) | Campos de empresa/contacto y separación de entidades en la base 14.0. El aislamiento y asignaciones de tres emisores son diseño GMP. |
+| O12 | [Exportación/importación 14.0](https://github.com/odoo/documentation/blob/14.0/content/applications/general/export_import_data.rst) | Acción Exportar, selección de campos y plantillas. La referencia describe CSV/XLS; RFQ propone CSV/XLSX y PDF para informes. |
+
 ## Qué significa «casi como calca» en este diseño
 
 El objetivo visual es Odoo **Enterprise 14**. Se propone conservar sus patrones de navegación y composición en los módulos nuevos: selector de aplicaciones, barra superior, controles de listado, formulario con estados, pestañas y TPV con pedido y catálogo.

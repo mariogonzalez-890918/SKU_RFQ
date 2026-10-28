@@ -1,4 +1,8 @@
+> Documento de diseño previo. El alcance implementado y las decisiones posteriores del usuario se encuentran en [IMPLEMENTACION.md](IMPLEMENTACION.md). Razones sociales dinámicas: solo AUXTI y Superadministrador administran sus vínculos con las cuatro sucursales.
+
 # Diseño funcional y navegación
+
+La ampliación [multirrazón, clientes, IVA, folios y cancelaciones](MULTIRAZON_CLIENTES_REPORTES.md) forma parte de este diseño y prevalece sobre cualquier regla comercial más general de las secciones siguientes.
 
 ## 1. Integración y vocabulario
 
@@ -22,19 +26,19 @@ La estructura verificada de Ventas 14 agrupa operaciones, catálogo, análisis y
 ```text
 Selector de aplicaciones RFQ_SKU_GMP
 ├─ SKU Compras / SKU Ventas / Requisiciones [actuales]
-├─ VentasIns
+├─ VentasIns [pedidos institucionales; razón social activa]
 │  ├─ Pedidos → Presupuestos · Pedidos · Clientes
 │  ├─ Productos → Productos · Listas de precios · Importar maestro
 │  ├─ Informes → Dashboard · Ventas y presupuestos
-│  └─ Configuración → Plantillas de presupuesto · Series · Condiciones
+│  └─ Configuración → Plantillas de presupuesto · Series y folio inicial · Condiciones
 ├─ Expendios
 │  ├─ Dashboard → Cajas asignadas · Abrir / continuar caja
 │  ├─ Punto de Venta → Pantalla de caja [dentro de Expendios]
-│  ├─ Pedidos → Tickets · Sesiones · Clientes
+│  ├─ Pedidos → Tickets · Sesiones · Clientes · Solicitudes de cancelación
 │  ├─ Productos → Catálogo del expendio · Listas de precios · Cargar layout
 │  ├─ Informes → Ventas · Detalle de ventas · Cierres
 │  └─ Configuración → Puntos de venta · Pagos · Recibos · Series
-└─ Administración [actual] → Usuarios · Accesos por perfil · Respaldos
+└─ Administración → Usuarios · Accesos por perfil · Razones sociales [nuevo] · Respaldos
 ```
 
 La organización de Expendios adapta los menús comunes de TPV 14 y su dashboard [O4–O6](FUENTES.md). **Punto de Venta no será una aplicación separada fuera de Expendios.** “Importar maestro”, “Cargar layout”, la entrada explícita a caja y el dashboard comercial son adaptaciones GMP. Equipos de ventas, variantes, facturación y otros menús de Odoo no se mostrarán como funcionalidades disponibles sin implementación y autorización de alcance.
@@ -64,10 +68,10 @@ Ver Expendios no concede abrir caja, cobrar, ver costos ni administrar. Desmarca
 | Expendios | Abrir/continuar caja asignada, cobrar, cerrar sesión propia e imprimir tickets. | Sucursal/caja/sesión asignadas. Sin modificar precios base, importar maestros o administrar perfiles. |
 | Superadministrador | Administración y revisión global. | Control de accesos; habilitación por sucursal y caja; auditoría. |
 | AUXTI | Soporte y configuración comercial autorizada. | Conserva las restricciones actuales de bajas/restauración y no cambia accesos por perfil ni se asigna Superadministrador. |
-| Gerente | Dashboard y supervisión comercial, excepciones y cierres autorizados. | Solo módulos habilitados; respetar alcance de sucursales y mantener las reglas actuales de requisiciones. |
+| Gerente | Dashboard y supervisión comercial, excepciones y cierres autorizados. | Solo módulos y razones sociales habilitados; respetar sucursales. **No cancela Expendios**; mantiene sus autorizaciones de requisiciones. |
 | Ventas, Compras, Alta, Visualizador, Almacenista, Requisición | Solo consulta comercial si se habilita expresamente; operación requiere permiso específico. | Ningún acceso comercial nuevo por pertenecer a un perfil actual. Requisición mantiene su aislamiento y la prohibición de ver costos. |
 
-Los valores anteriores son **defaults propuestos**, no altas de cuentas. Los módulos comerciales empiezan deshabilitados para perfiles actuales salvo Superadministrador. En Usuarios se asignan sucursales, cajas y, para VentasIns, cartera/equipo; no basta el checkbox del módulo. Un usuario sin alcance recibe una pantalla de asignación pendiente, nunca acceso a todas las sucursales.
+Los valores anteriores son **defaults propuestos**, no altas de cuentas. Los módulos comerciales empiezan deshabilitados para perfiles actuales salvo Superadministrador. En Usuarios se asignan razones sociales, sucursales, cajas y, para VentasIns, cartera/equipo; no basta el checkbox del módulo. Un usuario sin alcance recibe una pantalla de asignación pendiente, nunca acceso a todas las sucursales.
 
 ## 4. Presupuestos y pedidos
 
@@ -84,7 +88,7 @@ flowchart LR
   G --> H[Ticket relacionado]
 ```
 
-El presupuesto registra cliente, sucursal, vendedor, vigencia, moneda, lista y revisión de precios, líneas, cantidades y unidad de venta, impuestos, descuentos y términos. La confirmación crea un pedido una sola vez mediante clave de idempotencia y conserva la referencia al presupuesto. Si se duplica para otra negociación se genera un documento nuevo, no se pisa el anterior.
+El presupuesto registra razón social emisora, cliente, sucursal, vendedor, vigencia, moneda, lista y revisión de precios, líneas, cantidades y unidad de venta, impuestos, descuentos y términos. La confirmación crea un pedido una sola vez mediante clave de idempotencia y conserva la referencia al presupuesto. Si se duplica para otra negociación se genera un documento nuevo, no se pisa el anterior.
 
 Estados propuestos de presupuesto: BORRADOR, ENTREGADO, ACEPTADO, VENCIDO, CANCELADO. Pedido: CONFIRMADO, ENTREGA_PARCIAL, ENTREGADO, CANCELADO. Pago es un estado independiente: PENDIENTE, PARCIAL, PAGADO. Una entrega o aceptación no demuestra cobro. Cambios después de confirmar crean revisión o solicitud de autorización; conservan fecha original, folio e historial.
 
@@ -94,10 +98,10 @@ Un pedido cobrado en Expendios se vincula al ticket y al saldo pendiente. No se 
 
 Odoo 14 proporciona listas y reglas de precios por segmentos/clientes [O3](FUENTES.md). Para GMP se propone un motor compartido por VentasIns y Expendios:
 
-1. Validar que la lista esté activa, vigente y permitida para canal y sucursal/caja.
+1. Validar que la lista pertenezca a la razón social activa y esté vigente y permitida para canal y sucursal/caja.
 2. Resolver lista explícita autorizada; si no, lista del cliente permitida; después lista predeterminada de la sucursal/canal. Si falta precio válido, bloquear confirmación/cobro y mostrar el motivo.
 3. En esa lista, resolver SKU + unidad de venta y rango de cantidad. Reglas ambiguas o vigencias superpuestas se rechazan al cargar; no decide el orden de las filas.
-4. Mostrar si el precio incluye impuestos y calcular todo en el servidor con decimales. La unidad de venta no se infiere de la unidad de compra ni de UM_ENTREGA de requisiciones.
+4. Mostrar si el precio incluye IVA de 0 %, 8 % o 16 % y calcular todo en el servidor con decimales. La unidad de venta no se infiere de la unidad de compra ni de UM_ENTREGA de requisiciones.
 5. Guardar en cada línea precio, moneda, unidad, impuestos, descuento, lista y revisión aplicadas. Cambiar una lista mañana no cambia un pedido, cobro o ticket histórico.
 
 VentasIns y Expendios seleccionan solo listas asignadas. Cambios manuales de precio, descuentos fuera de límite o cambio de lista restringida necesitan permiso/autorización; ningún precio enviado por el navegador se acepta sin validar. Tarifas cero requieren una regla explícita autorizada, no ausencia de dato. Primera etapa: precios fijos, vigencia y tramos de cantidad; fórmulas complejas y promociones quedan para un alcance posterior.
@@ -118,7 +122,7 @@ flowchart LR
 
 La confirmación de pago guarda venta, líneas, pagos y folio de forma atómica. Reintentar por doble clic o pérdida de respuesta devuelve el mismo resultado. La impresión sucede después: un fallo de impresora no cancela un cobro ni crea otro. Reimprimir conserva folio e importes y registra que es copia [O8](FUENTES.md).
 
-Primera etapa propuesta: efectivo y registro manual de medios autorizados; registrar tarjeta/transferencia no procesa una transacción bancaria. Devoluciones, retiros, diferencias de caja y cancelaciones requieren capacidad y autorización; las ventas cobradas no se borran, se corrigen con movimientos vinculados. No se cierra una caja ajena mediante un identificador conocido.
+Primera etapa propuesta: efectivo y registro manual de medios autorizados; registrar tarjeta/transferencia no procesa una transacción bancaria. Devoluciones, retiros y diferencias de caja requieren capacidad y autorización. Las solicitudes de cancelación de Expendios tienen folio y **solo AUXTI o Superadministrador pueden autorizarlas**, excluyendo Gerencia; las ventas cobradas no se borran, se corrigen con movimientos vinculados. No se cierra una caja ajena mediante un identificador conocido.
 
 ## 7. Dashboard y presupuesto de ventas
 
@@ -134,7 +138,7 @@ Primera etapa propuesta: efectivo y registro manual de medios autorizados; regis
 | Meta y cumplimiento | Meta comercial contra la métrica elegida explícitamente, por sucursal/canal/período. |
 | Caja | Efectivo esperado, contado y diferencia; sesión independiente de fecha del pedido. |
 
-Filtros y detalle: período → canal → sucursal → vendedor/caja → cliente/producto → documento. Cada tarjeta indicará si incluye impuestos y cuál fecha usa. Las cantidades solo se suman por unidad compatible; monedas separadas hasta definir conversión. No se propone margen/utilidad hasta disponer del costo del producto de venta: el costo de insumos de requisiciones no equivale al costo del producto terminado.
+Filtros y detalle: período → razón social → canal → sucursal → vendedor/caja → cliente/producto → documento. Cada tarjeta indicará si incluye impuestos y cuál fecha usa. Las cantidades solo se suman por unidad compatible; monedas separadas hasta definir conversión. No se propone margen/utilidad hasta disponer del costo del producto de venta: el costo de insumos de requisiciones no equivale al costo del producto terminado.
 
 ## 8. Formatos de impresión
 

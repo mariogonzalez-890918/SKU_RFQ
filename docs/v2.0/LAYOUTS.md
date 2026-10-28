@@ -1,8 +1,12 @@
+> Documento de diseño previo. El alcance implementado y las decisiones posteriores del usuario se encuentran en [IMPLEMENTACION.md](IMPLEMENTACION.md). Razones sociales dinámicas: solo AUXTI y Superadministrador administran sus vínculos con las cuatro sucursales.
+
 # Layouts propuestos — revisión, no importadores implementados
 
 Formato objetivo: Excel `.xlsx` y CSV UTF-8 para datos tabulares. Descargar una plantilla versionada desde cada módulo, seleccionar archivo, mapear encabezados, validar, previsualizar altas/cambios/errores y confirmar. No se mezclan productos, reglas de precios y asignación a cajas en una sola hoja implícita.
 
 El maestro histórico actual usa **SUGERIDO**, SKU en **A**, descripción en **H** y módulo PDV en **F**. Se conserva ese importador. El layout comercial nuevo usa encabezados; no se interpreta automáticamente como la misma hoja ni actualiza los SKU validados de A.
+
+Todos los layouts comerciales incluyen **RAZON_SOCIAL_CLAVE**, validada contra una de las tres capturadas y contra el acceso del usuario. Los SKU globales no cambian al asignar disponibilidad por emisor. Las tasas permitidas son **0, 8 y 16**, expresadas como porcentaje, no como fracción.
 
 ## 1. PRODUCTOS_VENTA, versión propuesta 1
 
@@ -19,9 +23,9 @@ El maestro histórico actual usa **SUGERIDO**, SKU en **A**, descripción en **H
 | ACTIVO | Sí | SI/NO. La baja comercial conserva documentos históricos. |
 | VENDIBLE_VENTASINS | Sí | SI/NO; autoriza publicación en ese canal, no permisos de usuarios. |
 | VENDIBLE_EXPENDIOS | Sí | SI/NO; requiere además asignación a sucursal/caja y precio válido. |
-| IMPUESTO_VENTA | Sí | Clave de un impuesto configurado, incluso tasa cero explícita; no inferir un impuesto por nombre de producto. |
+| IVA_TASA | Sí | 0, 8 o 16; referencia a la configuración de la razón social. No asignar por nombre ni sucursal. |
 
-Ejemplo **ficticio**: `PTPB07BOL0000A`, BOLILLO DEMO, PT, PB, 07, A11, PIEZA, código de barras vacío, SI, SI, SI, IVA_DEMO. El precio no se toma de UM_COMPRA ni del costo de requisiciones.
+Ejemplo **ficticio**: `PTPB07BOL0000A`, BOLILLO DEMO, PT, PB, 07, A11, PIEZA, código de barras vacío, SI, SI, SI, IVA_TASA 0 explícita. El precio no se toma de UM_COMPRA ni del costo de requisiciones.
 
 ## 2. LISTAS_PRECIOS, versión propuesta 1
 
@@ -38,7 +42,7 @@ Ejemplo **ficticio**: `PTPB07BOL0000A`, BOLILLO DEMO, PT, PB, 07, A11, PIEZA, c�
 | VIGENTE_DESDE / VIGENTE_HASTA | Fechas ISO; hasta vacío significa vigencia abierta. |
 | ACTIVA | SI/NO; no elimina versiones utilizadas. |
 
-Clave de actualización: lista + canal + alcance + SKU + unidad + rango + vigencia, con identificador de regla estable al exportar. Actualizar una regla crea revisión y conserva la anterior. Filas ambiguas se reportan, no se resuelven por posición en Excel. El modo “solo agregar” omite existentes; “actualizar seleccionados” requiere permiso de precios y confirmación de diferencias.
+Clave de actualización: razón social + lista + canal + alcance + SKU + unidad + rango + vigencia, con identificador de regla estable al exportar. Actualizar una regla crea revisión y conserva la anterior. Filas ambiguas se reportan, no se resuelven por posición en Excel. El modo “solo agregar” omite existentes; “actualizar seleccionados” requiere permiso de precios y confirmación de diferencias.
 
 ## 3. EXPENDIOS_LAYOUT, versión propuesta 1
 
@@ -58,6 +62,14 @@ Este layout organiza qué se ve en la caja. No carga ventas pagadas, efectivo, e
 Plantilla de presupuesto: `PLANTILLA_CLAVE`, `NOMBRE`, `CANAL`, `ORDEN`, `TIPO_LINEA` (PRODUCTO/SECCION/NOTA), `SKU`, `CANTIDAD`, `UNIDAD_VENTA`, `TEXTO`, `VIGENCIA_DIAS`, `CONDICIONES_CLAVE`. Precio resuelto al usar la plantilla, no fijado por una celda vieja salvo regla explícita autorizada. Productos opcionales quedan identificados como opcionales.
 
 Meta comercial: `PERIODO_DESDE`, `PERIODO_HASTA`, `CANAL`, `SUCURSAL`, `VENDEDOR_CLAVE` opcional, `METRICA` (PEDIDOS_CONFIRMADOS/VENTA_TPV_NETA/COBRADO), `IMPORTE_META`, `MONEDA`, `INCLUYE_IMPUESTOS`. Se rechazan metas duplicadas para el mismo alcance y período; no son cotizaciones a clientes. Esta hoja es propuesta por la ambigüedad de “presupuestar dashboard” y requiere validación de alcance.
+
+## 5. CLIENTES, versión propuesta 1
+
+`CLIENTE_CLAVE`, `RAZON_SOCIAL_CLAVE`, `TIPO_PERSONA`, `NOMBRE`, `NOMBRE_COMERCIAL`, `RFC` opcional, `CORREO`, `TELEFONO`, `CALLE`, `NUMERO`, `COLONIA`, `CP`, `MUNICIPIO`, `ESTADO`, `PAIS`, `CONTACTO_PADRE_CLAVE` opcional, `TIPO_DIRECCION` (PRINCIPAL/ENTREGA/COBRO), `VENDEDOR_CLAVE`, `LISTA_PRECIOS`, `CONDICIONES_PAGO`, `ACTIVO`.
+
+Identidad estable y relación comercial por emisor; no fusionar por nombre/RFC automáticamente. Una dirección hija debe referenciar un cliente existente y autorizado. No importar límites de crédito o nuevas carteras sin capacidad específica. El detalle de identidad compartida y restricciones está en [Multirrazón y clientes](MULTIRAZON_CLIENTES_REPORTES.md).
+
+Las razones sociales se capturan desde configuración por el usuario; no se crean emisores por encontrar una clave desconocida en un Excel. El folio inicial se configura con permiso, no se infiere de filas importadas de clientes/productos.
 
 ## Reglas comunes de importación
 
