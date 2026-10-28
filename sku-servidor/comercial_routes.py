@@ -43,6 +43,7 @@ class CommercialAPI:
   if action=='sesiones':return cm.sessions(company,actor)
   if action=='cancelaciones':return cm.cancellations(company,actor)
   if action=='documentos':return cm.documents(company,actor,channel,{k:v[0] for k,v in query.items()})
+  if action=='documento/excel':return report_xlsx(report_rows({'documentos':[cm.get_document(query.get('id',[''])[0],actor,channel)]})),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if action=='documento':return cm.get_document(query.get('id',[''])[0],actor,channel)
   if action=='imprimir':return document_html(cm.get_document(query.get('id',[''])[0],actor,channel),channel),'text/html; charset=utf-8'
   raise ValueError('Opción comercial no encontrada.')
