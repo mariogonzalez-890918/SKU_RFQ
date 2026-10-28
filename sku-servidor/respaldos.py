@@ -2,7 +2,7 @@
 import base64,copy,hashlib,hmac,json,pathlib,re,uuid,zipfile,io
 from requisiciones import BRANCHES,AREAS,Conflict,now
 from areas import default_catalog,validate_catalog
-MODULES={'compras':'SKU Compras','ventas':'SKU Ventas','requisiciones':'Requisición de compras / materiales'}
+MODULES={'compras':'SKU Compras','ventas':'SKU Ventas','requisiciones':'Requisición de compras / materiales','comercial':'Pedidos institucionales y Expendios'}
 TABLES=('req_materials','req_masters','req_branches','req_series_registry','req_documents','req_costs','req_reports','req_report_features','req_changes','req_document_versions','req_images','req_areas')
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 def check(condition,message):
@@ -36,7 +36,10 @@ class BackupStore:
   if module in ('compras','ventas'):
    table='catalog' if module=='compras' else 'sales_catalog';revision,payload=db.execute('SELECT revision,payload FROM '+table+' WHERE id=1').fetchone();return {'revision':revision,'catalogo':json.loads(payload)}
   tables={}
-  for table in TABLES:
+  selected=TABLES
+  if module=='comercial':
+   from respaldo_comercial import TABLES as selected
+  for table in selected:
    info=db.execute('PRAGMA table_info('+table+')').fetchall();columns=[r[1] for r in info];primary=[name for _,name in sorted((r[5],r[1]) for r in info if r[5])];order=','.join(primary) if primary else 'rowid'
    tables[table]={'columnas':columns,'filas':[list(row) for row in db.execute('SELECT * FROM '+table+' ORDER BY '+order)]}
   return {'tablas':tables}
@@ -55,6 +58,9 @@ class BackupStore:
   expected=backup.get('checksum');check(isinstance(expected,str) and hmac.compare_digest(expected,digest({k:v for k,v in backup.items() if k!='checksum'})),'El archivo está incompleto o su comprobación de integridad no coincide.')
   check(isinstance(backup.get('datos'),dict),'Faltan los datos del respaldo.');return copy.deepcopy(backup['datos']),False
  def validate(self,db,module,data):
+  if module=='comercial':
+   from respaldo_comercial import validate
+   return validate(db,data)
   if module in ('compras','ventas'):
    catalog=data.get('catalogo');check(isinstance(catalog,dict),'Falta el catálogo del respaldo.')
    if module=='compras':self.validate_purchase(catalog,self.store.catalogs)
@@ -134,6 +140,9 @@ class BackupStore:
   check(bool(unpacked['req_masters']),'Falta el maestro de materiales.')
   for row in unpacked['req_masters']:check(isinstance(row['filename'],str) and row['filename'].lower().endswith(('.xlsx','.csv','.tsv','.txt')),'Archivo de maestro inválido.');base64.b64decode(row['content'],validate=True);json.loads(row['report'])
  def summary(self,module,data):
+  if module=='comercial':
+   from respaldo_comercial import summary
+   return summary(data)
   if module in ('compras','ventas'):
    state=data['catalogo']['state'];return {'articulos':len(state['registros']),'activos':sum(not r['eliminado'] for r in state['registros']),'consecutivo':state['maxId'],'skuReservados':len(state['reservados'])}
   tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas']),'imagenes':len(tables['req_images']['filas']),'areas':len(json.loads(tables['req_areas']['filas'][0][2])['areas'])}
@@ -154,6 +163,9 @@ class BackupStore:
      from ventas import validate
      validate(catalog)
     db.execute('INSERT INTO '+history+' VALUES(?,?,?)',(current['revision'],now(),json.dumps(current['catalogo'],ensure_ascii=False)));db.execute('UPDATE '+table+' SET revision=?,payload=? WHERE id=1',(current['revision']+1,json.dumps(catalog,ensure_ascii=False)))
+   elif module=='comercial':
+    from respaldo_comercial import restore
+    restore(db,incoming,current)
    else:
     old_branches={r[0]:(r[2],r[3]) for r in current['tablas']['req_branches']['filas']};old_registry=dict(db.execute('SELECT series,branch FROM req_series_registry'))
     for table in reversed(TABLES):db.execute('DELETE FROM '+table)
@@ -172,6 +184,7 @@ class BackupStore:
  def previous(self,id,actor):
   self.authorize(actor,'compras');check(bool(re.fullmatch('[a-f0-9]{32}',id)),'Identificador inválido.');path=self.store.directory/'respaldos'/('antes-'+id+'.json');check(path.is_file(),'No se encuentra la copia de seguridad previa.');return path.read_bytes()
  def reset(self,data,actor,apply=False):
+  if data.get('modulo')=='comercial':raise ValueError('Las ventas y movimientos comerciales no se vacían. Usa respaldos y restauración para recuperar una instalación, conservando el historial.')
   if apply and actor['role']!='superadmin':raise PermissionError('AUXTI necesita aprobación de sistemas para vaciar datos.')
   module=data.get('modulo');self.authorize(actor,module)
   with self.store.connect() as db:

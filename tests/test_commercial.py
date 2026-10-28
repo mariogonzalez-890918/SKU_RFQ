@@ -86,6 +86,13 @@ class CommercialTests(fixtures.ModuleBackupTests):
  def test_pos_blocks_outdated_displayed_price_before_charging(self):
   self.load_master();doc,data,box=self.sale();data['clave']=uuid.uuid4().hex;data['partidas']=[{'sku':SKU,'cantidad':'1','precioVisto':'100','ivaVisto':'16'}]
   self.assertEqual(self.call('/api/comercial/cobrar',{'canal':'expendios',**data})[0],409);self.assertEqual(len(self.cm('documentos',channel='expendios')['documentos']),1)
+ def test_commercial_backup_restore_keeps_folio_floor(self):
+  self.load_master();doc=self.order();backup=self.value('/api/respaldos?modulo=comercial');review=self.value('/api/respaldos/restaurar/revisar',{'modulo':'comercial','respaldo':backup});self.value('/api/respaldos/restaurar/confirmar',{'modulo':'comercial','respaldo':backup,'huellaActual':review['huellaActual'],'confirmar':True})
+  self.assertEqual(self.value('/api/comercial/documento?canal=ventasins&id='+doc['id'])['folio'],doc['folio']);new=self.order();self.assertNotEqual(new['folio'],doc['folio']);self.assertEqual(self.call('/api/respaldos/restaurar/revisar',{'modulo':'comercial','respaldo':backup})[0],409)
+ def test_commercial_restore_rejects_foreign_references(self):
+  import respaldos
+  self.load_master();doc,data,box=self.sale();backup=self.value('/api/respaldos?modulo=comercial');table=backup['datos']['tablas']['cm_sessions'];table['filas'][0][table['columnas'].index('box')]='CAJA_INEXISTENTE';backup['checksum']=respaldos.digest({k:v for k,v in backup.items() if k!='checksum'})
+  self.assertEqual(self.call('/api/respaldos/restaurar/revisar',{'modulo':'comercial','respaldo':backup})[0],400);self.assertEqual(self.call('/api/respaldos/vaciar/revisar',{'modulo':'comercial'})[0],400)
 
 # No duplicar la batería de requisiciones heredada al descubrir esta clase.
 for name in list(fixtures.ModuleBackupTests.__dict__):

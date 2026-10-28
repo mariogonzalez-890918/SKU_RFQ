@@ -1,8 +1,8 @@
-# RFQ_SKU_GMP 2.0.0-rc2
+# RFQ_SKU_GMP 2.0.0
 
-RC2 corrige el bloqueo de la interfaz comercial al acceder por IP mediante HTTP: las claves de envío utilizan `crypto.getRandomValues`, disponible en ese contexto, en lugar de `crypto.randomUUID`, que requiere un contexto seguro. Los dos accesos a Pedidos institucionales y Expendios/TPV aparecen al principio de Inicio y en la sección de módulos del menú. Se mantienen las restricciones por perfil, razón social, sucursal y caja.
+La versión 2.0.0 corrige el bloqueo de la interfaz comercial al acceder por IP mediante HTTP: las claves de envío utilizan `crypto.getRandomValues`, disponible en ese contexto, en lugar de `crypto.randomUUID`, que requiere un contexto seguro. Los dos accesos a Pedidos institucionales y Expendios/TPV aparecen al principio de Inicio y en la sección de módulos del menú. Se mantienen las restricciones por perfil, razón social, sucursal y caja.
 
-Integración candidata para revisión, sin sustituir automáticamente el servicio instalado. Los módulos comerciales comparten usuarios, sesión y SQLite con RFQ_SKU_GMP. Los catálogos SKU y las requisiciones mantienen sus rutas y reglas.
+Versión 2.0.0 para instalar en el servidor. El proceso de compilación no sustituye automáticamente el servicio instalado. Los módulos comerciales comparten usuarios, sesión y SQLite con RFQ_SKU_GMP. Los catálogos SKU y las requisiciones mantienen sus rutas y reglas.
 
 ## Razones sociales y sucursales
 
@@ -14,7 +14,7 @@ Eliminar conserva el registro inactivo y las copias históricas en documentos. N
 
 ## Activación y uso
 
-1. Conservar una copia de `data` y `config.json` de la instalación antes de probar la candidata. El EXE público arranca vacío y no incluye credenciales, maestros, información fiscal ni la liga privada de OneDrive.
+1. Conservar una copia de `data` y `config.json` de la instalación antes de instalar la actualización. El EXE público arranca vacío y no incluye credenciales, maestros, información fiscal ni la liga privada de OneDrive.
 2. Superadministrador habilita **Pedidos institucionales** y/o **Expendios / Punto de venta** en los accesos por perfil. Existen los roles nuevos **VentasIns** y **Expendios**. Los perfiles existentes conservan sus accesos guardados.
 3. Entrar al módulo desde el menú de la aplicación. AUXTI necesita que el módulo esté habilitado; una vez habilitado puede administrar las razones sociales.
 4. Capturar razones sociales y sucursales, importar el Excel de prueba en **Maestro de ventas** y revisar antes de aplicar. En **Accesos por usuario**, Superadministrador asigna empresas, sucursales y cajas a los operadores.
@@ -38,9 +38,13 @@ La importación es transaccional: un error conserva la versión anterior. No bor
 
 **Actualización automática cada 12 horas**, ejecutada por el servidor, y botón **Sincronizar ahora**. La liga se configura únicamente en la base privada. La fuente proporcionada inicialmente permite ver el libro en navegador, pero la descarga directa devolvió acceso denegado. Se requiere una liga que entregue el XLSX sin una sesión de navegador. El inicio OAuth/renovación de tokens de Graph no se incluye en esta candidata; no se afirma que la liga de vista previa ya sincronice. Ante error permanece el último maestro válido.
 
-## Límites de esta candidata
+## Respaldo comercial y alcance
 
-Se entrega para probar la integración y revisar sus pantallas antes de reemplazar el servicio operativo. Los respaldos/restauraciones por módulo de la versión anterior siguen disponibles para SKU y requisiciones; no incluyen las tablas comerciales nuevas. Para preservar toda la candidata, detener el servicio y copiar completa la carpeta `data`. La restauración comercial selectiva y reportes dinámicos avanzados de agrupación quedan pendientes antes de considerar la v2 estable.
+En Respaldos se añade **Pedidos institucionales y Expendios** como bloque completo. Incluye todas las empresas, vínculos, catálogo comercial, precios, clientes, plantillas, documentos, cajas, sesiones, cobros, cancelaciones, reembolsos, auditoría, folios, permisos comerciales y la configuración privada de la fuente. Se revisa el contenido y se guarda una copia previa antes de confirmar. Solo Superadministrador restaura directamente; AUXTI conserva el flujo de aprobación existente.
+
+Una restauración en una base con operaciones posteriores se rechaza si retrocede documentos, cierres, cancelaciones o movimientos de dinero. Para recuperar un respaldo anterior se usa una instalación vacía. Se mantienen los máximos de folios y el historial de series; la fuente automática queda desactivada para revisar su configuración tras restaurar. El módulo comercial no ofrece vaciado de ventas. SKU y requisiciones mantienen sus respaldos independientes.
+
+Pedidos institucionales inicia en **Presupuestos**, con listas separadas de **Pedidos**, acciones Crear/Guardar/Confirmar e importes por partida en una hoja de pedido. Su búsqueda agrega productos como renglones. Expendios inicia en el **TPV**, con carrito y cobro a la izquierda, catálogo de tarjetas a la derecha y selección de expendio/razón social/caja. Ambos comparten autenticación y datos, no la pantalla de operación.
 
 No se incluyen contabilidad, CFDI, conciliación bancaria, funcionamiento sin conexión ni control de existencias físicas. Las operaciones comerciales registran cantidades y cobros; no representan movimientos del inventario de requisiciones.
 
