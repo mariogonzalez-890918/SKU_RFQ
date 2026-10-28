@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.6.0
+# RFQ_SKU_GMP · Versión 1.7.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -97,3 +97,5 @@ Esta prueba utiliza datos vacíos y credenciales aleatorias temporales. Las guí
 | `tools/` | Inicialización local sin datos empresariales |
 | `tests/` | Verificación de instalación limpia |
 
+
+Requisición y Almacenista solicitan aprobación o cancelación desde el detalle. Superadministrador, AUXTI y Gerente autorizan; se conserva el folio y el historial. Almacenista registra cantidades realmente surtidas en UM_ENTREGA después de aprobarse la requisición y la marca SURTIDA. Solicitado y surtido se muestran por separado, también en ambas impresiones, sin mostrar costos al perfil Requisición. El costeo conserva su base de cantidad solicitada; las canceladas siguen excluidas.

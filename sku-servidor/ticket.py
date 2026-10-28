@@ -7,7 +7,8 @@ def print_ticket(document):
  rows=[]
  for index,line in enumerate(document['partidas'],1):
   note='<p class="line-note">'+e(line['observaciones'])+'</p>' if line['observaciones'] else ''
-  rows.append('<section class="item"><div class="item-heading"><span>'+str(index)+'.</span><strong>'+e(line['nombre'])+'</strong></div><p class="sku">'+e(line['sku'] or 'SIN SKU / ID '+str(line['materialId']))+'</p><p class="amount"><span>Cantidad solicitada</span><strong>'+e(line['cantidad'])+' '+e(line['unidad'])+'</strong></p>'+note+'</section>')
+  delivered='<p class="amount"><span>Cantidad surtida</span><strong>'+e(line['cantidadSurtida'])+' '+e(line['unidad'])+'</strong></p>' if 'cantidadSurtida' in line else ''
+  rows.append('<section class="item"><div class="item-heading"><span>'+str(index)+'.</span><strong>'+e(line['nombre'])+'</strong></div><p class="sku">'+e(line['sku'] or 'SIN SKU / ID '+str(line['materialId']))+'</p><p class="amount"><span>Cantidad solicitada</span><strong>'+e(line['cantidad'])+' '+e(line['unidad'])+'</strong></p>'+delivered+note+'</section>')
  info=''.join('<div class="meta-row"><b>'+label+'</b><span>'+e(value)+'</span></div>' for label,value in [('Sucursal',document['sucursal']),('Área',document['area']),('Solicitante',document['solicitante']),('Fecha',document['fechaHora']),('Capturó',document.get('nombreUsuario') or document['creadoPor'])])
  general='<section class="general-note"><b>Observaciones</b><p>'+e(document['observaciones'])+'</p></section>' if document['observaciones'] else ''
  signatures=''.join('<div class="signature"><div class="signature-line"></div><span>'+label+' · Nombre y firma</span></div>' for label in ('Solicita','Entrega','Recibe'))

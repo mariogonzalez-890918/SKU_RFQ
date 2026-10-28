@@ -1,0 +1,32 @@
+"""Aprobación, cancelación y surtido con identidad, sucursal y revisión del servidor."""
+import json,unittest,uuid
+import test_backup_import as fixture
+class FulfillmentTests(unittest.TestCase):
+ def setUp(self):
+  self.case=fixture.ModuleBackupTests();self.case.setUp();self.case.import_req([fixture.product(B='SKU00000000001'),fixture.product('SEGUNDO MATERIAL',B='SKU00000000002')]);self.materials=self.case.value('/api/requisiciones/materiales')['materiales'];self.requester=self.user('capture@example.com','requisicion',sucursales=['EJIDOS']);self.warehouse=self.user('warehouse@example.com','almacenista',almacenes=['EJIDOS']);self.aux=self.user('aux@example.com','auxti');self.manager=self.user('manager@example.com','gerente')
+ def tearDown(self):self.case.tearDown()
+ def user(self,email,role,**access):
+  self.case.value('/api/users',{'email':email,'name':role,'role':role,'active':True,'password':self.case.password,**access});return self.case.login(email)
+ def create(self):return self.case.value('/api/requisiciones',{'sucursal':'EJIDOS','area':'Produccion Donas','solicitante':'Persona','observaciones':'','claveCliente':uuid.uuid4().hex,'partidas':[{'materialId':m['id'],'cantidad':'3','observaciones':''} for m in self.materials]},self.requester)['documento']
+ def change(self,doc,kind,actor,**extra):return self.case.value('/api/requisiciones/cambios',{'tipo':kind,'objetivo':doc['id'],'revision':doc.get('revision',1),'motivo':'Prueba '+kind,**extra},actor)
+ def decide(self,change,actor,approved=True):return self.case.value('/api/requisiciones/cambios/'+change['id']+'/resolver',{'aprobar':approved,'comentario':'Decisión autorizada'},actor)
+ def test_request_cancellation_and_three_approvers(self):
+  for approver in (self.case.admin,self.aux,self.manager):
+   for requester in (self.requester,self.warehouse):
+    doc=self.create();pending=self.change(doc,'cancelar',requester);self.assertIsNone(pending['documento']);self.assertEqual(pending['cambio']['estado'],'PENDIENTE');self.assertEqual(self.case.value('/api/requisiciones/'+doc['id'])['estado'],'SOLICITADA');result=self.decide(pending['cambio'],approver);self.assertEqual(result['documento']['estado'],'CANCELADA');self.assertEqual(result['documento']['fechaHora'],doc['fechaHora']);self.assertEqual(self.case.call('/api/requisiciones/cambios/'+pending['cambio']['id']+'/resolver',{'aprobar':True,'comentario':'Otra vez'},approver)[0],409)
+  self.assertEqual(self.case.value('/api/requisiciones/reportes/general/ejecutar')['resumen']['total'],'0.00')
+ def test_approve_then_actual_quantities_and_prints(self):
+  doc=self.create();pending=self.change(doc,'aprobar',self.requester);approved=self.decide(pending['cambio'],self.aux)['documento'];self.assertEqual(approved['estado'],'APROBADA');amounts=[{'materialId':m['id'],'cantidadSurtida':q} for m,q in zip(self.materials,('1.25','0'))];surtida=self.change(approved,'surtir',self.warehouse,datos={'partidas':amounts})['documento'];self.assertEqual(surtida['estado'],'SURTIDA');self.assertEqual([p['cantidad'] for p in surtida['partidas']],['3','3']);self.assertEqual([p['cantidadSurtida'] for p in surtida['partidas']],['1.25','0']);self.assertEqual(surtida['numero'],doc['numero']);own=self.case.value('/api/requisiciones/'+doc['id'],actor=self.requester);self.assertIn('surtido',own);self.assertEqual(own['partidas'][0]['cantidadSurtida'],'1.25');self.assertNotIn('costo',json.dumps(own).lower())
+  for suffix in ('','?formato=ticket'):
+   code,raw,_=self.case.call('/api/requisiciones/'+doc['id']+'/imprimir'+suffix,actor=self.requester);self.assertEqual(code,200);self.assertIn('Surtida' if not suffix else 'Cantidad surtida',raw.decode());self.assertIn('1.25',raw.decode());self.assertNotIn('costo',raw.decode().lower())
+  history=self.case.value('/api/requisiciones/'+doc['id']+'/historial',actor=self.requester);self.assertEqual(len(history['versiones']),2);self.assertEqual(history['cambios'][-1]['tipo'],'surtir');backup=self.case.value('/api/respaldos?modulo=requisiciones');self.case.value('/api/respaldos/restaurar/revisar',{'modulo':'requisiciones','respaldo':backup});self.assertEqual(self.case.call('/api/requisiciones/cambios',{'tipo':'surtir','objetivo':doc['id'],'revision':surtida['revision'],'motivo':'Doble entrega','datos':{'partidas':amounts}},self.warehouse)[0],409)
+ def test_scope_permissions_invalid_amounts_and_revision(self):
+  doc=self.create();payload={'tipo':'surtir','objetivo':doc['id'],'revision':1,'motivo':'Entrega','datos':{'partidas':[{'materialId':m['id'],'cantidadSurtida':'1'} for m in self.materials]}}
+  self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.warehouse)[0],409);self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.requester)[0],403);approved=self.change(doc,'aprobar',self.manager)['documento'];payload['revision']=approved['revision']
+  for invalid in ('-1','4','NaN','Infinity','0.0000001',''):
+   payload['datos']['partidas'][0]['cantidadSurtida']=invalid;self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.warehouse)[0],400)
+  payload['datos']['partidas'][0]['cantidadSurtida']='1';other=self.user('other@example.com','requisicion',sucursales=['EJIDOS']);self.assertEqual(self.case.call('/api/requisiciones/cambios',{'tipo':'cancelar','objetivo':doc['id'],'revision':approved['revision'],'motivo':'Ajena'},other)[0],403)
+  wrong=self.user('wrong@example.com','almacenista',almacenes=['SAN PABLO']);self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,wrong)[0],403);self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.aux)[0],403);payload['revision']=1;self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.warehouse)[0],409)
+ def test_pending_decisions_revalidate_and_rejection_does_not_cancel(self):
+  doc=self.create();pending=self.change(doc,'cancelar',self.requester)['cambio'];self.decide(pending,self.manager,False);self.assertEqual(self.case.value('/api/requisiciones/'+doc['id'])['estado'],'SOLICITADA');pending=self.change(doc,'cancelar',self.requester)['cambio'];self.case.value('/api/users',{'email':'capture@example.com','name':'Persona','role':'requisicion','active':True,'sucursales':['SAN PABLO']});self.assertEqual(self.case.call('/api/requisiciones/cambios/'+pending['id']+'/resolver',{'aprobar':True,'comentario':'Perdió acceso'},self.aux)[0],409)
+if __name__=='__main__':unittest.main()

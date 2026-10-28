@@ -98,12 +98,14 @@ class BackupStore:
    check(row['branch'] in BRANCHES and re.fullmatch('[A-Z0-9][A-Z0-9-]{1,19}',row['series']) and row['series'] not in registry,'Registro de series inválido.');registry[row['series']]=row['branch']
   for row in branches:check(registry.get(row['series'])==row['branch'],'La serie no pertenece a su sucursal.')
   def document(doc):
-   check(isinstance(doc,dict) and re.fullmatch('[a-f0-9]{32}',doc.get('id','')) and doc.get('sucursal') in BRANCHES and doc.get('area') in area_names and doc.get('estado') in ('SOLICITADA','CANCELADA') and type(doc.get('folio')) is int and doc['folio']>=1 and doc.get('numero')==doc.get('serie','')+'-'+str(doc['folio']).zfill(6),'Requisición inválida.')
+   check(isinstance(doc,dict) and re.fullmatch('[a-f0-9]{32}',doc.get('id','')) and doc.get('sucursal') in BRANCHES and doc.get('area') in area_names and doc.get('estado') in ('SOLICITADA','APROBADA','SURTIDA','CANCELADA') and type(doc.get('folio')) is int and doc['folio']>=1 and doc.get('numero')==doc.get('serie','')+'-'+str(doc['folio']).zfill(6),'Requisición inválida.')
    check(isinstance(doc.get('fechaHora'),str) and doc.get('fecha')==doc['fechaHora'][:10] and isinstance(doc.get('solicitante'),str) and isinstance(doc.get('observaciones'),str),'Fecha o texto de requisición inválido.')
    lines=doc.get('partidas');check(isinstance(lines,list) and 1<=len(lines)<=200,'Partidas inválidas.');seen=set()
    from reportes import dec
    for line in lines:
     check(isinstance(line,dict) and type(line.get('materialId')) is int and line['materialId'] in materials and line['materialId'] not in seen and all(isinstance(line.get(k),str) for k in ('sku','nombre','unidad','proveedor','observaciones')),'Referencia de material inválida.');dec(line.get('cantidad'),True);seen.add(line['materialId'])
+    if 'cantidadSurtida' in line:check(0<=dec(line['cantidadSurtida'])<=dec(line['cantidad']),'Cantidad surtida inválida.')
+    if doc['estado']=='SURTIDA':check('cantidadSurtida' in line,'Falta cantidad surtida.')
   docs={}
   for row in unpacked['req_documents']:
    doc=json.loads(row['payload']);document(doc);check(row['id']==doc['id'] and row['branch']==doc['sucursal'] and row['series']==doc['serie'] and row['folio']==doc['folio'] and row['number']==doc['numero'] and row['created_at']==doc['fechaHora'] and row['id'] not in docs,'El índice de solicitudes no coincide con los documentos.');check(registry.get(doc['serie'])==doc['sucursal'],'Serie histórica de otra sucursal.');docs[doc['id']]=doc
@@ -117,7 +119,7 @@ class BackupStore:
   for row in unpacked['req_reports']:
    c=json.loads(row['payload']);check(c.get('id')==row['id'] and re.fullmatch('[A-Za-z0-9_-]{1,64}',row['id']) and type(row['revision']) is int and row['revision']>=1,'Reporte inválido.');self.reports.config(c,area_names=area_names)
   for row in unpacked['req_changes']:
-   c=json.loads(row['payload']);check(c.get('objetivo') in docs and c.get('id')==row['id'] and c.get('sucursal')==row['branch'] and c.get('solicitadoPor')==row['requester'] and c.get('estado')==row['status'] and c.get('estado') in ('PENDIENTE','APROBADA','RECHAZADA') and c.get('tipo') in ('cancelar','modificar') and type(c.get('revision')) is int,'Autorización inválida.')
+   c=json.loads(row['payload']);check(c.get('objetivo') in docs and c.get('id')==row['id'] and c.get('sucursal')==row['branch'] and c.get('solicitadoPor')==row['requester'] and c.get('estado')==row['status'] and c.get('estado') in ('PENDIENTE','APROBADA','RECHAZADA') and c.get('tipo') in ('cancelar','modificar','aprobar','surtir') and type(c.get('revision')) is int,'Autorización inválida.')
    if c['tipo']=='modificar':
     values=c.get('datos');check(isinstance(values,dict) and set(values)=={'area','solicitante','observaciones','partidas'},'Campos de corrección inválidos.');document({**docs[c['objetivo']],**values})
   check(bool(unpacked['req_masters']),'Falta el maestro de materiales.')

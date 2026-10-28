@@ -2,6 +2,7 @@
 import decimal,json,uuid
 from requisiciones import AREAS,Conflict,now,text,visible_branches,requester_document
 EDITORS={'superadmin','gerente'}
+APPROVERS=EDITORS|{'auxti'}
 
 def requester_change(change):
  result={key:change[key] for key in ('id','fecha','tipo','objetivo','folio','sucursal','revision','motivo','solicitadoPor','estado','resueltoPor','resuelto','comentario','perfilSolicitante','requiereSistemas') if key in change}
@@ -25,12 +26,28 @@ class WorkflowStore:
  def _prepare(self,db,data,actor):
   kind=data.get('tipo');reason=text(data.get('motivo',''),1000)
   if not reason:raise ValueError('Escribe el motivo del cambio.')
-  if kind not in ('cancelar','modificar'):raise ValueError('Tipo de cambio inválido. Los costos solo los editan Gerente y Superadministrador.')
+  if kind not in ('cancelar','modificar','aprobar','surtir'):raise ValueError('Tipo de cambio inválido. Los costos solo los editan Gerente y Superadministrador.')
   id=data.get('objetivo');doc=self._document(db,id,actor);revision=data.get('revision')
   if type(revision) is not int or revision!=doc.get('revision',1):raise Conflict('La solicitud cambió. Ábrela de nuevo antes de proponer el cambio.')
   if doc['estado']=='CANCELADA':raise ValueError('La solicitud ya está cancelada; el folio permanece reservado.')
   values={}
+  if kind=='aprobar' and doc['estado']!='SOLICITADA':raise Conflict('Solo se aprueban requisiciones solicitadas.')
+  if kind=='surtir':
+   if actor['role']!='almacenista':raise PermissionError('Solo Almacenista registra lo realmente surtido.')
+   if doc['estado']!='APROBADA':raise Conflict('Primero debe aprobarse la requisición para registrar el surtido.')
+   payload=data.get('datos');lines=payload.get('partidas') if isinstance(payload,dict) else None
+   if not isinstance(payload,dict) or set(payload)!={'partidas'} or not isinstance(lines,list) or len(lines)!=len(doc['partidas']):raise ValueError('Captura el surtido de todas las partidas.')
+   original={line['materialId']:line for line in doc['partidas']};seen=set();actual=[]
+   for line in lines:
+    if not isinstance(line,dict) or set(line)!={'materialId','cantidadSurtida'} or type(line.get('materialId')) is not int or line['materialId'] not in original or line['materialId'] in seen or isinstance(line.get('cantidadSurtida'),bool):raise ValueError('Partida de surtido inválida o repetida.')
+    try:q=decimal.Decimal(str(line['cantidadSurtida']))
+    except decimal.InvalidOperation:raise ValueError('Cantidad surtida inválida.')
+    if not q.is_finite() or not 0<=q<=decimal.Decimal(original[line['materialId']]['cantidad']) or q.as_tuple().exponent < -6:raise ValueError('El surtido debe estar entre cero y lo solicitado, con hasta seis decimales. Para entregar más solicita una corrección autorizada.')
+    seen.add(line['materialId']);actual.append({'materialId':line['materialId'],'cantidadSurtida':format(q,'f')})
+   if not any(decimal.Decimal(r['cantidadSurtida'])>0 for r in actual):raise ValueError('Registra al menos una cantidad surtida mayor a cero.')
+   values={'partidas':actual}
   if kind=='modificar':
+   if doc['estado']=='SURTIDA':raise Conflict('La requisición ya tiene surtido registrado. Su entrega e historial se conservan.')
    values=data.get('datos')
    if not isinstance(values,dict) or set(values)-{'area','solicitante','observaciones','partidas'}:raise ValueError('Solo pueden corregirse área, solicitante, observaciones y partidas. Fecha, sucursal, SKU y folio se conservan.')
    area=values.get('area');requester=text(values.get('solicitante',''),160);notes=text(values.get('observaciones',''),2000);lines=values.get('partidas')
@@ -57,20 +74,28 @@ class WorkflowStore:
   if doc['estado']=='CANCELADA':raise Conflict('La requisición ya fue cancelada.')
   revision=doc.get('revision',1);db.execute('INSERT INTO req_document_versions VALUES(?,?,?)',(doc['id'],revision,json.dumps(doc,ensure_ascii=False)))
   if change['tipo']=='cancelar':doc['estado']='CANCELADA';doc['cancelacion']={'motivo':change['motivo'],'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
-  else:doc.update(change['datos'])
+  elif change['tipo']=='aprobar':doc['estado']='APROBADA';doc['aprobacion']={'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
+  elif change['tipo']=='surtir':
+   if doc['estado']!='APROBADA':raise Conflict('La requisición debe estar aprobada antes de surtir.')
+   actual={r['materialId']:r['cantidadSurtida'] for r in change['datos']['partidas']}
+   for line in doc['partidas']:line['cantidadSurtida']=actual[line['materialId']]
+   doc['estado']='SURTIDA';doc['surtido']={'fecha':now(),'registradoPor':actor['email'],'observaciones':change['motivo']}
+  else:
+   doc.update(change['datos'])
+   if doc['estado']=='APROBADA':doc['estado']='SOLICITADA';doc.pop('aprobacion',None)
   doc['revision']=revision+1;doc['ultimoCambio']={'tipo':change['tipo'],'motivo':change['motivo'],'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
   db.execute('UPDATE req_documents SET payload=? WHERE id=?',(json.dumps(doc,ensure_ascii=False),doc['id']))
   return doc
  def submit(self,data,actor):
-  if actor['role']=='requisicion' and data.get('tipo')!='modificar':raise PermissionError('Este perfil solo puede solicitar correcciones; no puede cancelar ni autorizar solicitudes.')
+  if actor['role']=='requisicion' and data.get('tipo') not in ('modificar','cancelar','aprobar'):raise PermissionError('Este perfil solo puede solicitar corrección, cancelación o aprobación de sus propias requisiciones.')
   if actor['role'] not in EDITORS|{'almacenista','auxti','requisicion'}:raise PermissionError('Solo gerencia, superadministrador o almacenista pueden solicitar estos cambios.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');c=self._prepare(db,data,actor);c.update({'id':uuid.uuid4().hex,'fecha':now(),'solicitadoPor':actor['email'],'estado':'PENDIENTE','perfilSolicitante':actor['role']})
-   # Un almacenista siempre espera autorización, incluso si conoce un ID de solicitud.
+   # Correcciones, aprobaciones y cancelaciones del almacenista requieren autorización; el surtido se registra después de aprobarse.
    result=None
-   old=self._document(db,c['objetivo'],actor);removed=c['tipo']=='cancelar' or bool({r['materialId'] for r in old['partidas']}-{r['materialId'] for r in c['datos'].get('partidas',[])})
+   old=self._document(db,c['objetivo'],actor);removed=c['tipo']=='modificar' and bool({r['materialId'] for r in old['partidas']}-{r['materialId'] for r in c['datos'].get('partidas',[])})
    c['requiereSistemas']=actor['role']=='auxti' and removed
-   if actor['role'] in EDITORS or actor['role']=='auxti' and not removed:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Cambio directo de gerencia/superadministrador.'})
+   if c['tipo']=='surtir' or actor['role'] in EDITORS or actor['role']=='auxti' and not removed:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido registrado por Almacenista.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
    db.execute('INSERT INTO req_changes VALUES(?,?,?,?,?,?)',(c['id'],c['sucursal'],actor['email'],c['estado'],c['fecha'],json.dumps(c,ensure_ascii=False)))
   return {'cambio':c,'documento':result}
  def list(self,actor):
@@ -80,9 +105,9 @@ class WorkflowStore:
   with self.store.connect() as db:rows=db.execute('SELECT payload FROM req_changes WHERE '+' AND '.join(clauses)+' ORDER BY created_at DESC,rowid DESC LIMIT 500',params).fetchall()
   changes=[json.loads(row[0]) for row in rows]
   if actor['role']=='requisicion':changes=[requester_change(c) for c in changes]
-  return {'cambios':changes,'puedeAutorizar':actor['role'] in EDITORS,'limite':500}
+  return {'cambios':changes,'puedeAutorizar':actor['role'] in APPROVERS,'limite':500}
  def decide(self,id,data,actor):
-  if actor['role'] not in EDITORS:raise PermissionError('Solo Gerente y Superadministrador pueden aprobar o rechazar cambios.')
+  if actor['role'] not in APPROVERS:raise PermissionError('Solo Superadministrador, AUXTI y Gerente pueden aprobar o rechazar solicitudes.')
   approved=data.get('aprobar');comment=text(data.get('comentario',''),1000)
   if type(approved) is not bool or not comment:raise ValueError('Indica la decisión y su comentario.')
   with self.store.connect() as db:
@@ -95,11 +120,14 @@ class WorkflowStore:
    if approved:
     # No aprobar propuestas de cuentas inactivas, sin módulo o sin el almacén asignado.
     user=db.execute('SELECT role,active FROM users WHERE email=?',(c['solicitadoPor'],)).fetchone()
-    if c.get('requiereSistemas'):
+    if c.get('requiereSistemas') and c['tipo']!='cancelar':
      if actor['email']!='sistemas@grupomipan.com':raise PermissionError('Solo sistemas@grupomipan.com puede aprobar eliminaciones de AUXTI.')
      if not user or not user[1] or user[0]!='auxti':raise Conflict('El solicitante ya no es AUXTI activo. Rechaza la propuesta.')
      modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('auxti',)).fetchone()
      if not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('AUXTI perdió acceso al módulo. Rechaza la propuesta.')
+    elif c.get('perfilSolicitante')=='auxti':
+     modules=db.execute("SELECT modules FROM role_modules WHERE role='auxti'").fetchone()
+     if not user or not user[1] or user[0]!='auxti' or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('AUXTI perdió acceso al módulo. Rechaza la propuesta.')
     elif c.get('perfilSolicitante')=='requisicion':
      if not user or not user[1] or user[0]!='requisicion':raise Conflict('El solicitante ya no tiene activo el perfil Requisición. Rechaza la propuesta.')
      modules=db.execute("SELECT modules FROM role_modules WHERE role='requisicion'").fetchone();owner=db.execute('SELECT creator FROM req_documents WHERE id=?',(c['objetivo'],)).fetchone()
