@@ -27,6 +27,7 @@ class CommercialAPI:
  def mutate(self,path,data,actor):
   cm=self.cm;channel=data.get('canal','ventasins');cm.module(actor,channel);action=path.removeprefix('/api/comercial/')
   if action=='empresas':return cm.save_company(data,actor)
+  if action=='sucursales/empresas':return cm.save_branch_companies(data,actor)
   if action=='fuente':return self.sync.save(data,actor)
   if action=='sincronizar':return self.sync.trigger(actor)
   if action=='empresas/eliminar':return cm.save_company(data,actor,True)

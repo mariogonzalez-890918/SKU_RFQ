@@ -6,6 +6,8 @@ Integración candidata para revisión, sin sustituir automáticamente el servici
 
 En el módulo comercial, **Configuración → Razones sociales** permite agregar tantas razones sociales como se requieran, editar sus datos y eliminarlas. Cada una se vincula explícitamente con una o varias de **EJIDOS, SAN PABLO, CUAUTITLAN y EJE 8**. **Solo Superadministrador y AUXTI** pueden realizar estas operaciones. Gerente y operadores no pueden hacerlo aunque modifiquen una petición HTTP.
 
+En **Configuración → Expendios y sucursales** se muestran siempre esas cuatro sucursales y se seleccionan sus razones sociales. En TPV se elige primero el expendio, después una razón social vinculada y finalmente su caja. Se respetan además los permisos de empresas, sucursales y cajas del usuario. No se asigna una empresa automáticamente a las cuatro sucursales.
+
 Eliminar conserva el registro inactivo y las copias históricas en documentos. No permite nuevas operaciones. Deben cerrarse primero las cajas abiertas; para desvincular una sucursal hay que reasignar sus cajas activas. La configuración usa revisiones para evitar sobrescribir cambios simultáneos.
 
 ## Activación y uso

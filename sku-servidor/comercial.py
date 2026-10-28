@@ -132,6 +132,22 @@ class CommercialStore:
    value={'empresas':list(dict.fromkeys(companies)),'sucursales':list(dict.fromkeys(branches)),'cajas':list(dict.fromkeys(boxes)),'acciones':list(dict.fromkeys(caps))}
    db.execute('INSERT INTO cm_access VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET payload=excluded.payload,revision=excluded.revision',(email,dumps(value),(old[0] if old else 0)+1));self.audit(db,actor,0,'acceso_comercial',{'email':email})
   return {'ok':True}
+ def save_branch_companies(self,data,actor):
+  self.admin(actor);branch=data.get('sucursal');selected=data.get('empresas');revisions=data.get('revisiones',{})
+  if branch not in BRANCHES or not isinstance(selected,list) or any(type(id) is not int for id in selected) or len(set(selected))!=len(selected) or not isinstance(revisions,dict):raise ValueError('Selecciona una de las cuatro sucursales y sus razones sociales.')
+  with self.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE');rows=[(id,rev,json.loads(p)) for id,rev,p in db.execute('SELECT id,revision,payload FROM cm_companies') if not json.loads(p).get('eliminada')]
+   if set(selected)-{id for id,_,_ in rows}:raise ValueError('Razón social no disponible.')
+   if any(revisions.get(str(id))!=rev for id,rev,_ in rows):raise Conflict('Cambió una razón social. Actualiza las asignaciones.')
+   for id,rev,value in rows:
+    before=branch in value['sucursales'];after=id in selected
+    if before==after:continue
+    if before:
+     boxes=db.execute('SELECT payload FROM cm_boxes WHERE company=? AND branch=?',(id,branch)).fetchall()
+     if any(json.loads(p).get('activa') for p, in boxes):raise ValueError('Reasigna o desactiva las cajas de esta razón social antes de desvincular la sucursal.')
+    value['sucursales']=[b for b in BRANCHES if (b in value['sucursales'] and b!=branch) or b==branch and after]
+    db.execute('UPDATE cm_companies SET revision=revision+1,payload=? WHERE id=?',(dumps(value),id));self.audit(db,actor,id,'razon_social_asignada_a_sucursal',{'sucursal':branch,'vinculada':after})
+  return {'ok':True}
  def access_list(self,actor):
   self.admin(actor)
   with self.store.connect() as db:rows=db.execute('SELECT u.email,u.name,u.role,a.payload,a.revision FROM users u LEFT JOIN cm_access a ON a.email=u.email ORDER BY email').fetchall()

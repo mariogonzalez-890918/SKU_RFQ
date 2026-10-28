@@ -77,6 +77,12 @@ class CommercialTests(fixtures.ModuleBackupTests):
  def test_ticket_flags_and_deleted_company_keep_document(self):
   self.load_master();doc=self.order();co=self.cm('meta')['empresas'][0];self.cm('empresas/eliminar',{'id':co['id'],'revision':co['revision']});self.assertEqual(self.value('/api/comercial/documento?canal=ventasins&id='+doc['id'])['emisor']['nombre'],'EMPRESA DEMO')
   self.assertEqual(self.call('/api/comercial/pedidos',{'empresa':self.company,'sucursal':'EJIDOS','clave':uuid.uuid4().hex,'partidas':[{'sku':SKU,'cantidad':'1'}]})[0],400)
+ def test_four_expendios_manual_company_assignment(self):
+  second=self.cm('empresas',{'nombre':'SEGUNDA EMPRESA','sucursales':['SAN PABLO']})['id'];co=self.cm('meta')['empresas'];revisions={str(c['id']):c['revision'] for c in co}
+  data={'sucursal':'EJIDOS','empresas':[second],'revisiones':revisions};aux=self.new_user('auxti');self.cm('sucursales/empresas',data,aux)
+  updated={c['id']:c for c in self.cm('meta')['empresas']};self.assertNotIn('EJIDOS',updated[self.company]['sucursales']);self.assertIn('EJIDOS',updated[second]['sucursales']);self.assertEqual(len(self.cm('meta')['sucursales']),4)
+  self.assertEqual(self.call('/api/comercial/sucursales/empresas',data)[0],409)
+  manager=self.new_user('gerente',[second]);self.assertEqual(self.call('/api/comercial/sucursales/empresas',data,manager)[0],403)
 
 # No duplicar la batería de requisiciones heredada al descubrir esta clase.
 for name in list(fixtures.ModuleBackupTests.__dict__):
