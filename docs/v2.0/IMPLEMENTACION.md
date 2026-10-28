@@ -1,4 +1,6 @@
-# RFQ_SKU_GMP 2.0.0-rc1
+# RFQ_SKU_GMP 2.0.0-rc2
+
+RC2 corrige el bloqueo de la interfaz comercial al acceder por IP mediante HTTP: las claves de envío utilizan `crypto.getRandomValues`, disponible en ese contexto, en lugar de `crypto.randomUUID`, que requiere un contexto seguro. Los dos accesos a Pedidos institucionales y Expendios/TPV aparecen al principio de Inicio y en la sección de módulos del menú. Se mantienen las restricciones por perfil, razón social, sucursal y caja.
 
 Integración candidata para revisión, sin sustituir automáticamente el servicio instalado. Los módulos comerciales comparten usuarios, sesión y SQLite con RFQ_SKU_GMP. Los catálogos SKU y las requisiciones mantienen sus rutas y reglas.
 

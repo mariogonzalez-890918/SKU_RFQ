@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 2.0.0-rc1
+# RFQ_SKU_GMP · Versión 2.0.0-rc2
 
 Candidata de revisión de los módulos VentasIns y Expendios. Consulta [instalación y alcance de v2](docs/v2.0/IMPLEMENTACION.md). La rama principal conserva la versión estable mientras se revisa esta integración.
 

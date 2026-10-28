@@ -78,3 +78,5 @@
 !/sku-servidor/public/commercial.js
 !/sku-servidor/public/commercial.css
 !/tests/test_commercial.py
+
+!/tests/commercial_browser_regression.mjs

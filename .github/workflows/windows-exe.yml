@@ -26,7 +26,9 @@ jobs:
       - name: Probar instalación y respaldos
         run: python -m unittest discover -s tests -v
       - name: Probar menú de celular y tablet
-        run: node tests/mobile_menu_regression.mjs
+        run: |
+          node tests/mobile_menu_regression.mjs
+          node tests/commercial_browser_regression.mjs
       - name: Compilar distribución pública
         run: python tools/build_public.py --output-dir dist-public
       - name: Publicar EXE y ZIP en Releases
@@ -37,5 +39,5 @@ jobs:
           $tag = "windows-${{ github.run_number }}-${{ github.run_attempt }}"
           $releaseOptions = @()
           if ("${{ github.ref_name }}" -ne "main") { $releaseOptions += "--prerelease" }
-          gh release create $tag dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe Generador-SKU-GMP-Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RFQ_SKU_GMP v2.0.0-rc1 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
+          gh release create $tag dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe Generador-SKU-GMP-Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RFQ_SKU_GMP v2.0.0-rc2 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
 

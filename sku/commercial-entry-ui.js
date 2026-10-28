@@ -1,7 +1,8 @@
-// Los módulos comerciales conservan una interfaz propia; comparten la sesión del servidor.
-for(const [module,title] of [['ventasins','Pedidos institucionales'],['expendios','Expendios / Punto de venta']]){
+// Los accesos comerciales quedan antes del resto de herramientas de Inicio.
+const commercialHome=document.createElement('section');commercialHome.id='gmpCommercialHome';commercialHome.className='gmp-commercial-home';commercialHome.setAttribute('aria-label','Ventas y expendios');
+for(const [module,title,description,icon] of [['ventasins','Pedidos institucionales','Clientes, presupuestos y pedidos','sell'],['expendios','Expendios / TPV','Ejidos, San Pablo, Cuautitlan y Eje 8','buy']]){
  if(!currentUser.modulos.includes(module))continue;
- const link=document.createElement('a');link.href='/comercial?canal='+module;link.textContent=title;link.className='gmp-commercial-entry';link.style.cssText='display:block;padding:13px 16px;color:inherit;text-decoration:none;border-radius:8px;margin:5px 0;background:rgba(125,105,160,.12)';
- const nav=document.querySelector('.gmp-sidebar nav')||$('gmpSidebar')||document.querySelector('aside')||$('sinModulos');nav.append(link);
- if($('sinModulos')&&!currentUser.modulos.some(m=>['compras','ventas','requisiciones'].includes(m))){$('sinModulos').hidden=false;$('sinModulos').querySelector('h2').textContent='Módulos comerciales';$('sinModulos').querySelector('p').textContent='Selecciona Pedidos institucionales o Expendios para continuar.';if(nav!==$('sinModulos'))$('sinModulos').append(link.cloneNode(true));}
+ const href='/comercial?canal='+module,button=document.createElement('a');button.href=href;button.id='gmpHome-'+module;button.className='gmp-commercial-button';button.append(gmpIcon(icon));const content=document.createElement('span'),name=document.createElement('strong'),note=document.createElement('small');name.textContent=title;note.textContent=description;content.append(name,note);button.append(content,gmpIcon('arrow'));commercialHome.append(button);
+ const link=document.createElement('a');link.href=href;link.textContent=title;link.className='gmp-commercial-nav';$('gmpModuleLinks').append(link);
 }
+if(commercialHome.childElementCount){$('gmpHome').prepend(commercialHome);$('gmpAccessCount').textContent=(Object.values(gmpAllowed).filter(Boolean).length-1+commercialHome.childElementCount)+' accesos disponibles';}
