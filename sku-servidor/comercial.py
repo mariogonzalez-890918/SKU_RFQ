@@ -293,6 +293,7 @@ class CommercialStore:
    if id and db.execute("SELECT 1 FROM cm_sessions WHERE box=? AND state='ABIERTA'",(id,)).fetchone():
     previous=json.loads(db.execute('SELECT payload FROM cm_boxes WHERE id=?',(id,)).fetchone()[0])
     if previous['sucursal']!=branch:raise ValueError('Cierra la sesión antes de cambiar la sucursal de una caja.')
+    if not value['activa']:raise ValueError('Cierra la sesión antes de desactivar la caja.')
    if id:db.execute('UPDATE cm_boxes SET branch=?,code=?,revision=revision+1,payload=? WHERE id=?',(branch,code,dumps(value),id))
    else:id=uuid.uuid4().hex;db.execute('INSERT INTO cm_boxes VALUES(?,?,?,?,1,?)',(id,company,branch,code,dumps(value)))
    self.audit(db,actor,company,'caja_guardada',{'id':id})
@@ -358,6 +359,7 @@ class CommercialStore:
    if not price:price=db.execute('SELECT payload,revision FROM cm_prices WHERE company=? AND list=? AND sku=? AND customer=?',(company,listing,sku,'')).fetchone()
    if not price:raise ValueError('El SKU no tiene precio en la lista de esta razón social: '+sku)
    price_value=json.loads(price[0]);unit_price=line.get('precio',price_value['precio']) if channel=='ventasins' else price_value['precio']
+   if channel=='expendios' and (line.get('precioVisto') is not None and amount(line['precioVisto'])!=amount(unit_price) or line.get('ivaVisto') is not None and amount(line['ivaVisto'])!=amount(product['iva'])):raise Conflict('Cambió el precio o IVA de '+sku+'. Actualiza los productos y revisa el total antes de cobrar.')
    value=tax_line(line.get('cantidad'),unit_price,product['iva'],line.get('descuento','0') if channel=='ventasins' else '0')
    result.append({'sku':sku,'nombre':product['nombre'],'unidad':product['unidad'],'nota':text(line.get('nota',''),500),'revisionProducto':row[1],'revisionPrecio':price[1],**value})
   return {'empresa':company,'emisor':issuer,'sucursal':branch,'cliente':customer,'lista':listing,'partidas':result,'condiciones':text(data.get('condiciones',''),2000),'base':money(sum(D(r['base']) for r in result)),'impuesto':money(sum(D(r['impuesto']) for r in result)),'total':money(sum(D(r['total']) for r in result))}

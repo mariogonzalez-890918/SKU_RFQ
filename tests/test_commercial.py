@@ -83,6 +83,9 @@ class CommercialTests(fixtures.ModuleBackupTests):
   updated={c['id']:c for c in self.cm('meta')['empresas']};self.assertNotIn('EJIDOS',updated[self.company]['sucursales']);self.assertIn('EJIDOS',updated[second]['sucursales']);self.assertEqual(len(self.cm('meta')['sucursales']),4)
   self.assertEqual(self.call('/api/comercial/sucursales/empresas',data)[0],409)
   manager=self.new_user('gerente',[second]);self.assertEqual(self.call('/api/comercial/sucursales/empresas',data,manager)[0],403)
+ def test_pos_blocks_outdated_displayed_price_before_charging(self):
+  self.load_master();doc,data,box=self.sale();data['clave']=uuid.uuid4().hex;data['partidas']=[{'sku':SKU,'cantidad':'1','precioVisto':'100','ivaVisto':'16'}]
+  self.assertEqual(self.call('/api/comercial/cobrar',{'canal':'expendios',**data})[0],409);self.assertEqual(len(self.cm('documentos',channel='expendios')['documentos']),1)
 
 # No duplicar la batería de requisiciones heredada al descubrir esta clase.
 for name in list(fixtures.ModuleBackupTests.__dict__):

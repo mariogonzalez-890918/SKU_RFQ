@@ -1,5 +1,5 @@
 """Documentos comerciales. El ticket usa una lista explícita sin datos fiscales."""
-import csv,html,io,zipfile
+import csv,html,io,zipfile,re
 from decimal import Decimal
 
 def esc(v):return html.escape(str(v),quote=True)
@@ -32,7 +32,7 @@ def report_rows(result,columns=None,selection=None):
   total+=Decimal(doc['total'])
   for line in doc['partidas']:
    v={**doc,**line,'descripcion':line['nombre'],'cliente':(doc.get('cliente') or {}).get('nombre','Público general')};rows.append([str(v.get(c,'')) for c in columns])
- rows.append(['GRAN TOTAL' if i==0 else str(total) if c=='total' else '' for i,c in enumerate(columns)])
+ rows.append([str(total) if c=='total' else 'GRAN TOTAL' if i==0 else '' for i,c in enumerate(columns)])
  return rows
 
 def report_csv(rows):
@@ -46,7 +46,11 @@ def report_xlsx(rows):
   value=''
   while n:n,r=divmod(n-1,26);value=chr(65+r)+value
   return value
- sheet='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join('<row r="'+str(i)+'">'+''.join('<c r="'+column(j)+str(i)+'" t="inlineStr"><is><t xml:space="preserve">'+escape(v)+'</t></is></c>' for j,v in enumerate(row,1))+'</row>' for i,row in enumerate(rows,1))+'</sheetData></worksheet>'
+ def cell(v,i,j):
+  ref=column(j)+str(i)
+  numeric=i>1 and rows[0][j-1] in ('Cantidad','Precio con IVA','IVA %','Subtotal','IVA incluido','Total') and re.fullmatch(r'\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
+  return '<c r="'+ref+'"><v>'+v+'</v></c>' if numeric else '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+escape(v)+'</t></is></c>'
+ sheet='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join('<row r="'+str(i)+'">'+''.join(cell(v,i,j) for j,v in enumerate(row,1))+'</row>' for i,row in enumerate(rows,1))+'</sheetData></worksheet>'
  out=io.BytesIO()
  with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
   z.writestr('[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
