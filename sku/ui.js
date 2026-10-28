@@ -16,7 +16,7 @@ const date=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'America/Mexico_C
 const sorted=cat=>Object.entries(cat).sort(([a],[b])=>a.localeCompare(b));
 for(const [id,cat] of [['tipo',TIP],['categoria',CAT],['subcategoria',SUB],['editTipo',TIP],['editCategoria',CAT],['editSubcategoria',SUB]])for(const [c,n] of sorted(cat))$(id).add(new Option(c+' — '+n,c));
 $('tipo').value='IN';$('categoria').value='08';$('subcategoria').value='32';
-function td(tr,value){const c=document.createElement('td');c.textContent=value;tr.append(c);return c;}
+function td(tr,value){const c=document.createElement('td');c.textContent=typeof value==='string'?gmpDate(value):value;tr.append(c);return c;}
 function render(){
  $('registros').replaceChildren();const q=norm($('buscar').value),f=$('filtro').value;let shown=0;
  const names=new Map();for(const r of state.registros)if(!r.eliminado)names.set(norm(r.nombre),(names.get(norm(r.nombre))||0)+1);

@@ -21,7 +21,7 @@ def catalog(cm,company,actor):
 
 def save_product(cm,data,actor):
  cm.admin(actor);company=data.get('empresa');cm.company(company,actor,True);name=text(data.get('nombre',''),300);unit=text(data.get('unidad',''),60);selected=data.get('canales',[]);sku=str(data.get('sku','')).strip().upper();original=data.get('skuOriginal');rate=amount(data.get('iva'))
- if not name or not unit or not isinstance(selected,list) or not selected or len(set(selected))!=len(selected) or set(selected)-{'ventasins','expendios'} or rate not in (0,8,16):raise ValueError('Indica descripción, unidad, IVA 0/8/16% y al menos un canal.')
+ if not name or not unit or not isinstance(selected,list) or not selected or len(set(selected))!=len(selected) or set(selected)-{'ventasins','expendios'} or rate not in (0,8,16):raise ValueError('Indica descripción, unidad, 0% sin IVA, 8% IEPS o 16% IVA y al menos un canal.')
  prices={l:optional_price((data.get('precios') or {}).get(l)) for l in ('PUBLICO','RUTA','DESPACHO')}
  if 'ventasins' in selected and prices['PUBLICO'] is None:raise ValueError('Institucionales requiere precio público con IVA.')
  if 'expendios' in selected and all(prices[k] is None for k in ('RUTA','DESPACHO')):raise ValueError('Expendios requiere al menos un precio de ruta o despacho.')

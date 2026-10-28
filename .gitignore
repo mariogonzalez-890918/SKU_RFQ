@@ -84,3 +84,9 @@
 !/tests/test_commercial_catalogs.py
 !/sku-servidor/public/layout-clientes.xlsx
 !/sku-servidor/public/layout-productos.xlsx
+
+!/sku/date-format.js
+
+!/sku-servidor/public/layout-precios.xlsx
+
+!/tests/test_commercial_updates.py

@@ -1,5 +1,6 @@
+from precios_masivos import import_prices
 """Rutas de la v2, aisladas de los catálogos y requisiciones existentes."""
-from comercial import CommercialStore,CHANNELS
+from comercial import CommercialStore,CHANNELS,tax_name
 from maestro_comercial import import_master
 from comercial_print import document_html,report_rows,report_csv,report_xlsx,report_pdf
 from comercial_sync import SyncService
@@ -18,6 +19,9 @@ class CommercialAPI:
   if action=='clientes/layout':
    from ventas import ROOT
    return (ROOT/'public/layout-clientes.xlsx').read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if action=='precios/layout':
+   from ventas import ROOT
+   cm.admin(actor);return (ROOT/'public/layout-precios.xlsx').read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if action=='productos/layout':
    from ventas import ROOT
    return (ROOT/'public/layout-productos.xlsx').read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -28,11 +32,11 @@ class CommercialAPI:
     ch=customer_channels(c);label='AMBOS' if len(ch)>1 else 'EXPENDIOS' if ch==['expendios'] else 'INSTITUCIONALES';rows.append([c.get('codigo',''),c['nombre'],label,c.get('rfc',''),c.get('correo',''),c.get('telefono',''),c.get('domicilio',''),c.get('entrega',''),c.get('condiciones',''),'SI' if c.get('activo') else 'NO'])
    return report_xlsx(rows,'CLIENTES'),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if action=='productos/excel':
-   rows=[['SKU','DESCRIPCION','CANAL','UOM','IVA %','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO','ACTIVO']]
+   rows=[['SKU','DESCRIPCION','CANAL','UOM','TIPO IMPUESTO','Tasa %','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO','ACTIVO']]
    products=product_catalog(cm,company,actor)['productos'] if actor['role'] in ('superadmin','auxti') else cm.products(company,actor,channel)['productos']
    for p in products:
     if channel=='ventasins' and not p.get('institucional',True) or channel=='expendios' and not p.get('expendio'):continue
-    ch='AMBOS' if p.get('institucional',True) and p.get('expendio') else 'EXPENDIOS' if p.get('expendio') else 'INSTITUCIONALES';prices=p.get('precios',{});rows.append([p['sku'],p['nombre'],ch,p['unidad'],p['iva'] if p.get('iva') is not None else 'PENDIENTE',prices.get('PUBLICO',''),prices.get('RUTA',''),prices.get('DESPACHO',''),'SI' if p.get('activo') else 'NO'])
+    ch='AMBOS' if p.get('institucional',True) and p.get('expendio') else 'EXPENDIOS' if p.get('expendio') else 'INSTITUCIONALES';prices=p.get('precios',{});rows.append([p['sku'],p['nombre'],ch,p['unidad'],tax_name(p.get('iva')),p['iva'] if p.get('iva') is not None else 'PENDIENTE',prices.get('PUBLICO',''),prices.get('RUTA',''),prices.get('DESPACHO',''),'SI' if p.get('activo') else 'NO'])
    return report_xlsx(rows),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if action=='clientes':return cm.customers(company,actor,channel)
   if action=='precios':return cm.prices(company,actor)
@@ -45,7 +49,7 @@ class CommercialAPI:
   if action=='documentos':return cm.documents(company,actor,channel,{k:v[0] for k,v in query.items()})
   if action=='documento/excel':return report_xlsx(report_rows({'documentos':[cm.get_document(query.get('id',[''])[0],actor,channel)]})),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if action=='documento':return cm.get_document(query.get('id',[''])[0],actor,channel)
-  if action=='imprimir':return document_html(cm.get_document(query.get('id',[''])[0],actor,channel),channel),'text/html; charset=utf-8'
+  if action=='imprimir':return document_html(cm.get_document(query.get('id',[''])[0],actor,channel),channel,query.get('formato',[''])[0]),'text/html; charset=utf-8'
   raise ValueError('Opción comercial no encontrada.')
  def mutate(self,path,data,actor):
   cm=self.cm;channel=data.get('canal','ventasins');cm.module(actor,channel);action=path.removeprefix('/api/comercial/')
@@ -56,6 +60,7 @@ class CommercialAPI:
   if action=='empresas/eliminar':return cm.save_company(data,actor,True)
   if action=='accesos':return cm.save_access(data,actor)
   if action=='clientes':return cm.save_customer(data,actor,channel)
+  if action=='precios/importar':return import_prices(cm,data,actor)
   if action=='clientes/importar':return import_customers(cm,data,actor,channel)
   if action=='productos':return save_product(cm,data,actor)
   if action=='precios':return cm.save_price(data,actor)

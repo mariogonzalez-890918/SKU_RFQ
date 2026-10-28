@@ -19,3 +19,5 @@ for(const modules of [['ventasins','expendios'],['expendios'],['requisiciones']]
  assert.deepEqual(home.children.map(e=>e.href),expected.map(m=>'/comercial?canal='+m));assert.equal(elements.gmpModuleLinks.childElementCount,expected.length);
 }
 console.log('PASS: arranque y claves de envío por HTTP/IP sin randomUUID; accesos comerciales al principio de Inicio y permisos de visibilidad respetados.');
+
+const dates=await fs.readFile('sku/date-format.js','utf8');const dc=vm.createContext({});vm.runInContext(dates,dc);assert.equal(vm.runInContext("gmpDate('2026-10-28T13:40:00-06:00')",dc),'28/10/2026 13:40:00');assert.equal(vm.runInContext("gmpDateISO('29/02/2024')",dc),'2024-02-29');assert.throws(()=>vm.runInContext("gmpDateISO('31/02/2026')",dc));assert.equal(vm.runInContext("gmpTax('8')",dc),'IEPS');assert.equal(vm.runInContext("gmpTax('16')",dc),'IVA');console.log('PASS: fechas dd/mm/yyyy, validación de fechas e identificación de IEPS/IVA.');

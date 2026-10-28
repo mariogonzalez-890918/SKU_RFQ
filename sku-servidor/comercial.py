@@ -1,3 +1,4 @@
+from fechas import iso_date
 """Ventas institucionales y Expendios: compañías, precios finales, documentos y caja."""
 import base64,collections,decimal,hashlib,json,re,uuid
 from permissions import require_module
@@ -21,12 +22,14 @@ def amount(v,positive=False):
  except (decimal.InvalidOperation,TypeError,ValueError):raise ValueError('Cantidad o importe inválido; máximo 999999999 y seis decimales.')
 def money(v):return format(D(v).quantize(CENT,rounding=decimal.ROUND_HALF_UP),'f')
 def fingerprint(data):return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False,allow_nan=False).encode()).hexdigest()
+def tax_name(rate):return 'PENDIENTE' if rate is None else 'IEPS' if D(str(rate))==8 else 'IVA' if D(str(rate))==16 else 'SIN IVA'
+
 def tax_line(quantity,price,rate,discount='0'):
  q=amount(quantity,True);p=amount(price);r=amount(rate);d=amount(discount)
- if r not in (D(0),D(8),D(16)) or d>100:raise ValueError('IVA permitido: 0, 8 o 16 %. Descuento de 0 a 100 %.')
+ if r not in (D(0),D(8),D(16)) or d>100:raise ValueError('Impuesto permitido: 0% sin IVA, 8% IEPS o 16% IVA. Descuento de 0 a 100 %.')
  gross=(q*p*(1-d/100)).quantize(CENT,rounding=decimal.ROUND_HALF_UP)
  net=(gross/(1+r/100)).quantize(CENT,rounding=decimal.ROUND_HALF_UP)
- return {'cantidad':format(q,'f'),'precio':format(p,'f'),'iva':format(r,'f'),'descuento':format(d,'f'),'base':money(net),'impuesto':money(gross-net),'total':money(gross),'incluyeIva':True}
+ return {'cantidad':format(q,'f'),'precio':format(p,'f'),'iva':format(r,'f'),'descuento':format(d,'f'),'base':money(net),'impuesto':money(gross-net),'total':money(gross),'incluyeIva':r==16,'incluyeImpuestos':True,'tipoImpuesto':tax_name(r)}
 
 class CommercialStore:
  def __init__(self,store):
@@ -175,7 +178,7 @@ class CommercialStore:
   from comercial_print import COLUMNS
   self.action(actor,channel,'reportes');company=data.get('empresa');self.company(company,actor);name=text(data.get('nombre',''),100);columns=data.get('columnas');filters=data.get('filtros',{})
   if not name or not isinstance(columns,list) or not columns or any(c not in COLUMNS for c in columns) or not isinstance(filters,dict):raise ValueError('Indica nombre, columnas y filtros del reporte.')
-  id=data.get('id');value={'nombre':name,'columnas':list(dict.fromkeys(columns)),'filtros':{k:text(filters.get(k,''),100) for k in ('desde','hasta','estado','sucursal','cliente')}}
+  id=data.get('id');value={'nombre':name,'columnas':list(dict.fromkeys(columns)),'filtros':{k:text(filters.get(k,''),100) for k in ('desde','hasta','estado','sucursal','cliente','caja','producto','campoFecha')}}
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');row=db.execute('SELECT company,channel,creator,revision FROM cm_reports WHERE id=?',(id,)).fetchone() if id else None
    if id and (not row or row[:3]!=(company,channel,actor['email'])):raise PermissionError('Reporte no disponible.')
@@ -257,7 +260,8 @@ class CommercialStore:
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');self.customer(db,customer,company,actor);prepared=[]
    for line in lines:
-    if not db.execute('SELECT 1 FROM cm_products WHERE sku=?',(line.get('sku'),)).fetchone():raise ValueError('SKU inválido en plantilla.')
+    product=db.execute('SELECT payload FROM cm_products WHERE sku=?',(line.get('sku'),)).fetchone()
+    if not product or not json.loads(product[0]).get('institucional',True):raise ValueError('SKU inválido para una plantilla institucional.')
     prepared.append({'sku':line['sku'],'cantidad':format(amount(line.get('cantidad'),True),'f'),'observaciones':text(line.get('observaciones',''),500)})
    value={'nombre':name,'cliente':customer,'partidas':prepared,'condiciones':text(data.get('condiciones',''),1000)}
    old=db.execute('SELECT company,creator,revision FROM cm_templates WHERE id=?',(id,)).fetchone() if id else None
@@ -395,19 +399,26 @@ class CommercialStore:
   self.module(actor,channel);row=db.execute('SELECT company,channel,creator,box,revision,payload FROM cm_documents WHERE id=?',(id,)).fetchone()
   if not row or row[1]!=channel:raise ValueError('Documento no encontrado.')
   self.company(row[0],actor);value=json.loads(row[5]);self.branch(value['emisor'],value['sucursal'],actor)
-  if channel=='expendios':self.box(db,row[3],row[0],actor)
+  if channel=='expendios':
+   box=self.box(db,row[3],row[0],actor);value.setdefault('cajaNombre',box['nombre']);value.setdefault('cajaCodigo',box['codigo'])
   if actor['role'] not in SUPERVISORS and row[2]!=actor['email']:raise PermissionError('Solo puedes consultar tus documentos.')
   return {'id':id,'revision':row[4],**value}
  def get_document(self,id,actor,channel):
   with self.store.connect() as db:return self.document(db,id,actor,channel)
  def documents(self,company,actor,channel,filters=None):
   self.module(actor,channel);self.company(company,actor);f=filters or {};result=[]
+  start=iso_date(f.get('desde'));end=iso_date(f.get('hasta'))
+  if start and end and start>end:raise ValueError('La fecha inicial no puede ser posterior a la final.')
+  if f.get('campoFecha','emision') not in ('','emision','pedido','entrega'):raise ValueError('Filtro de fecha inválido.')
   with self.store.connect() as db:
    for id, in db.execute('SELECT id FROM cm_documents WHERE company=? AND channel=? ORDER BY created DESC',(company,channel)):
     try:value=self.document(db,id,actor,channel)
     except PermissionError:continue
-    if f.get('desde') and value['fecha'][:10]<f['desde'] or f.get('hasta') and value['fecha'][:10]>f['hasta']:continue
+    date_value=value.get('fechaEntrega','') if f.get('campoFecha')=='entrega' else value.get('fechaPedido',value['fecha'][:10]) if f.get('campoFecha')=='pedido' else value['fecha'][:10]
+    if (start or end) and not date_value or start and date_value<start or end and date_value>end:continue
+    if f.get('producto') and not any(f['producto'].upper() in (line['sku']+' '+line['nombre']).upper() for line in value['partidas']):continue
     if f.get('estado') and value['estado']!=f['estado'] or f.get('sucursal') and value['sucursal']!=f['sucursal']:continue
+    if f.get('caja') and value.get('caja')!=f['caja']:continue
     if f.get('cliente') and (value.get('cliente') or {}).get('id')!=f['cliente']:continue
     result.append(value)
   totals={k:money(sum(D(v[k]) for v in result if v['estado']!='CANCELADO')) for k in ('base','impuesto','total')}
@@ -436,6 +447,9 @@ class CommercialStore:
    value=self.prepare(db,data,actor,'ventasins',company);kind=data.get('tipo','PRESUPUESTO')
    if kind not in ('PRESUPUESTO','PEDIDO'):raise ValueError('Selecciona presupuesto o pedido.')
    if old and old['tipo']=='PEDIDO' and kind!='PEDIDO':raise ValueError('Un pedido no puede volver a presupuesto.')
+   pedido=iso_date(data.get('fechaPedido',(old or {}).get('fechaPedido',(old or {}).get('fecha',now())[:10])))
+   entrega=iso_date(data.get('fechaEntrega',(old or {}).get('fechaEntrega','')))
+   value.update({'fechaPedido':pedido or now()[:10],'fechaEntrega':entrega})
    number=old['folio'] if old and kind==old['tipo'] else self.next_number(db,company,kind)
    value.update({'tipo':kind,'folio':number,'presupuestoOrigen':old['folio'] if old and old['tipo']=='PRESUPUESTO' and kind=='PEDIDO' else (old or {}).get('presupuestoOrigen',''),'estado':'PEDIDO' if kind=='PEDIDO' else 'PRESUPUESTO','fecha':old['fecha'] if old else now(),'modificado':now(),'creador':old['creador'] if old else actor['email']})
    return self.persist(db,value,actor,'ventasins',key,hash,old)
@@ -458,7 +472,7 @@ class CommercialStore:
    session,box=self.session(db,data.get('sesion'),company,actor);value=self.prepare(db,data,actor,'expendios',company,box);ticket_only=session.get('modo')=='TICKETS' or data.get('soloTicket') is True;method='TICKET' if ticket_only else data.get('metodo');received=D(0) if ticket_only else amount(data.get('recibido','0'));total=D(value['total'])
    if method not in (('TICKET',) if ticket_only else ('EFECTIVO','TARJETA','TRANSFERENCIA')):raise ValueError('Método de pago inválido.')
    if method=='EFECTIVO' and received<total:raise ValueError('El efectivo recibido es menor al total.')
-   value.update({'tipo':'VENTA','folio':self.next_number(db,company,'TPV:'+box['id']),'folioInterno':self.next_number(db,company,'INT:'+box['id']),'estado':'EMITIDA' if ticket_only else 'PAGADA','modo':'TICKETS' if ticket_only else 'COBRO','fecha':now(),'creador':actor['email'],'caja':box['id'],'sesion':session['id'],'ticket':box['ticket'],'pago':{'metodo':method,'recibido':'0.00' if ticket_only else money(received) if method=='EFECTIVO' else value['total'],'cambio':money(received-total) if method=='EFECTIVO' else '0.00'},'reembolso':'NO APLICA'})
+   value.update({'tipo':'VENTA','folio':self.next_number(db,company,'TPV:'+box['id']),'folioInterno':self.next_number(db,company,'INT:'+box['id']),'estado':'EMITIDA' if ticket_only else 'PAGADA','modo':'TICKETS' if ticket_only else 'COBRO','fecha':now(),'creador':actor['email'],'caja':box['id'],'cajaNombre':box['nombre'],'cajaCodigo':box['codigo'],'sesion':session['id'],'ticket':box['ticket'],'pago':{'metodo':method,'recibido':'0.00' if ticket_only else money(received) if method=='EFECTIVO' else value['total'],'cambio':money(received-total) if method=='EFECTIVO' else '0.00'},'reembolso':'NO APLICA'})
    db.execute('UPDATE cm_sessions SET revision=revision+1 WHERE id=?',(session['id'],))
    return self.persist(db,value,actor,'expendios',key,hash)
  def request_cancel(self,data,actor):

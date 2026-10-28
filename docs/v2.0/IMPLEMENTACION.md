@@ -63,3 +63,15 @@ Expendios: apertura de sesión para emitir tickets sin solicitar fondo ni regist
 El maestro puede actualizarse manualmente, desde una descarga autorizada de OneDrive o desde una ruta XLSX del servidor. La programación opcional es cada 12 horas. Una página de vista previa que requiera autorización de Microsoft no garantiza acceso de descarga.
 
 Para activar esta versión en una instalación existente, detener el ejecutable anterior, conservar data y config.json, reemplazar el EXE y reiniciarlo. La publicación en GitHub no actualiza automáticamente el servidor.
+
+## Reportes de cajas (2.1.1)
+
+Expendios incluye filtro por caja y columna de código/nombre en el reporte y las exportaciones Excel, CSV y PDF. El filtro se conserva en reportes guardados y respeta la sucursal y los permisos existentes. Los tickets nuevos conservan el nombre y código de caja al emitir; documentos anteriores recuperan la identificación de su caja actual.
+
+La versión 2.1.1 también normaliza fechas visibles y filtros como dd/mm/yyyy sin cambiar el almacenamiento ISO. La columna N del maestro define 0% sin IVA, 8% IEPS y 16% IVA, incluidos en el precio; los documentos y exportaciones distinguen tipo e importe. No se presume impuesto cero para celdas vacías.
+
+En institucionales se capturan fecha de pedido y de entrega, con filtros por cliente, producto y rango según emisión/pedido/entrega. El perfil institucional puede editar el precio por partida, manteniendo el impuesto del maestro. Las plantillas tienen editor propio de cliente, productos, cantidades y observaciones. Se guardan con revisión para detectar ediciones simultáneas.
+
+La impresión permite preferencia local de A4 o ticket 80 mm en institucionales; Expendios usa 80 mm. La selección de impresora física se realiza en el diálogo de Windows del navegador. No se instala un controlador ni se selecciona una impresora de forma silenciosa.
+
+Precios por cliente incluye descarga de clientes y layout PRECIOS con código de cliente, SKU, precio con impuesto y precio antes de impuesto. Se admite uno de los importes y se calcula el otro; si están ambos se validan contra la tasa del maestro, con tolerancia de un centavo. Carga transaccional revisada: no se aplican filas parciales ni duplicados y se detectan cambios del catálogo entre revisión y confirmación. Este flujo respeta los permisos de administración de precios existentes.

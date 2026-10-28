@@ -1,8 +1,8 @@
 """Compila una distribución pública con catálogos vacíos y sin credenciales incorporadas."""
 import argparse,pathlib,runpy,secrets,shutil,subprocess,sys,tempfile,zipfile
 ROOT=pathlib.Path(__file__).resolve().parent.parent
-SERVER_FILES=('productos_comerciales.py','clientes_comerciales.py','respaldo_comercial.py','comercial.py','comercial_routes.py','comercial_print.py','comercial_sync.py','maestro_comercial.py','server.py','ventas.py','requisiciones.py','permissions.py','reportes.py','reporte_export.py','autorizaciones.py','compras.py','respaldos.py','app_info.py','imagenes.py','aprobaciones_admin.py','areas.py','ticket.py','catalogos.json')
-GUIDE='''RFQ_SKU_GMP v2.1.0 - DISTRIBUCIÓN PÚBLICA
+SERVER_FILES=('precios_masivos.py','fechas.py','productos_comerciales.py','clientes_comerciales.py','respaldo_comercial.py','comercial.py','comercial_routes.py','comercial_print.py','comercial_sync.py','maestro_comercial.py','server.py','ventas.py','requisiciones.py','permissions.py','reportes.py','reporte_export.py','autorizaciones.py','compras.py','respaldos.py','app_info.py','imagenes.py','aprobaciones_admin.py','areas.py','ticket.py','catalogos.json')
+GUIDE='''RFQ_SKU_GMP v2.1.1 - DISTRIBUCIÓN PÚBLICA
 
 1. Extrae el ZIP en una carpeta fija, por ejemplo C:\\SKU-GMP.
 2. Ejecuta RFQ_SKU_GMP.exe. No necesitas instalar Python.

@@ -1,3 +1,4 @@
+from fechas import display_date
 """Vista de impresión de requisiciones para BIXOLON: rollo de 80 mm, contenido de 72 mm."""
 import html
 from app_info import TITLE,VERSION,SUPPORT_LINE
@@ -9,7 +10,7 @@ def print_ticket(document):
   note='<p class="line-note">'+e(line['observaciones'])+'</p>' if line['observaciones'] else ''
   delivered='<p class="amount"><span>Cantidad surtida</span><strong>'+e(line['cantidadSurtida'])+' '+e(line['unidad'])+'</strong></p>' if 'cantidadSurtida' in line else ''
   rows.append('<section class="item"><div class="item-heading"><span>'+str(index)+'.</span><strong>'+e(line['nombre'])+'</strong></div><p class="sku">'+e(line['sku'] or 'SIN SKU / ID '+str(line['materialId']))+'</p><p class="amount"><span>Cantidad solicitada</span><strong>'+e(line['cantidad'])+' '+e(line['unidad'])+'</strong></p>'+delivered+note+'</section>')
- info=''.join('<div class="meta-row"><b>'+label+'</b><span>'+e(value)+'</span></div>' for label,value in [('Sucursal',document['sucursal']),('Área',document['area']),('Solicitante',document['solicitante']),('Fecha',document['fechaHora']),('Capturó',document.get('nombreUsuario') or document['creadoPor'])])
+ info=''.join('<div class="meta-row"><b>'+label+'</b><span>'+e(value)+'</span></div>' for label,value in [('Sucursal',document['sucursal']),('Área',document['area']),('Solicitante',document['solicitante']),('Fecha',display_date(document['fechaHora'])),('Capturó',document.get('nombreUsuario') or document['creadoPor'])])
  general='<section class="general-note"><b>Observaciones</b><p>'+e(document['observaciones'])+'</p></section>' if document['observaciones'] else ''
  signatures=''.join('<div class="signature"><div class="signature-line"></div><span>'+label+' · Nombre y firma</span></div>' for label in ('Solicita','Entrega','Recibe'))
  return ('''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'''+e(document['numero'])+''' · Ticket Bixolon</title><style>

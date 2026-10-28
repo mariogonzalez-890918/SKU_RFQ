@@ -1,23 +1,29 @@
+from comercial import tax_name
+from fechas import display_date
 """Documentos comerciales. El ticket usa una lista explícita sin datos fiscales."""
 import csv,html,io,zipfile,re
 from decimal import Decimal
 
 def esc(v):return html.escape(str(v),quote=True)
 
-def document_html(doc,channel):
- ticket=channel=='expendios';settings=doc.get('ticket',{});logo='<img src="/logo.png" alt="Mi Pan" class="logo">'
- if ticket:
+def document_html(doc,channel,formato=""):
+ if formato not in ("","a4","ticket"):raise ValueError("Formato de impresión inválido.")
+ ticket=channel=='expendios' or formato=='ticket';settings=doc.get('ticket',{});logo='<img src="/logo.png" alt="Mi Pan" class="logo">'
+ if channel=='expendios':
   header=(logo if settings.get('mostrarLogo',True) else '')+('<h2>'+esc(doc['sucursal'])+'</h2>' if settings.get('mostrarSucursal',True) else '')
   subtitle='Ticket '+esc(doc['folio'])+'<br>Folio interno '+esc(doc['folioInterno'])
  else:
   company=doc['emisor'];customer=doc.get('cliente') or {}
   header=logo+'<h1>'+esc(company['nombre'])+'</h1><p>'+esc(company.get('rfc',''))+'<br>'+esc(company.get('domicilio',''))+'</p>'
   subtitle=esc(doc['tipo'])+' '+esc(doc['folio'])+'<p>Cliente: '+esc(customer.get('nombre','Público general'))+'<br>'+esc(customer.get('domicilio',''))+'</p>'
+ if channel=='ventasins':subtitle+='<p>Fecha pedido: '+esc(display_date(doc.get('fechaPedido',doc['fecha'][:10])))+'<br>Fecha entrega: '+esc(display_date(doc.get('fechaEntrega','')))+'</p>'
  rows=''.join('<tr><td>'+esc(r['nombre'])+'<small>'+esc(r['sku'])+'</small></td><td>'+esc(r['cantidad'])+' '+esc(r['unidad'])+'</td><td>$'+esc(r['precio'])+'</td><td>$'+esc(r['total'])+'</td></tr>' for r in doc['partidas'])
+ print_options=('<a class="download" href="/api/comercial/imprimir?id='+esc(doc['id'])+'&amp;canal=ventasins&amp;formato=a4">Hoja A4</a> · <a class="download" href="/api/comercial/imprimir?id='+esc(doc['id'])+'&amp;canal=ventasins&amp;formato=ticket">BIXOLON 80 mm</a> ' if channel=='ventasins' else '<span class="download">BIXOLON 80 mm</span> ')
+ tax_detail=''.join('<br>'+name+' incluido $'+esc(format(sum((Decimal(r['impuesto']) for r in doc['partidas'] if tax_name(r.get('iva'))==name),Decimal(0)),'.2f')) for name in ('IEPS','IVA') if any(tax_name(r.get('iva'))==name for r in doc['partidas']))
  css='@page{size:80mm auto;margin:4mm}body{width:72mm;margin:0;font:11px Arial}.logo{width:30mm}h2{font-size:15px}' if ticket else '@page{size:A4;margin:15mm}body{font:13px Arial;max-width:900px;margin:auto}.logo{width:85px;float:right}'
- return ('<!doctype html><html lang="es"><meta charset="utf-8"><title>'+esc(doc['folio'])+'</title><style>'+css+'table{width:100%;border-collapse:collapse}td,th{padding:6px 2px;border-bottom:1px solid #ddd;text-align:left}small{display:block;font-size:.8em}.total{text-align:right;font-weight:bold;font-size:1.3em}.sign{margin-top:35px;border-top:1px solid #555;text-align:center}@media print{button,.download{display:none}}</style><button onclick="window.print()">Imprimir / Guardar PDF</button> <a class="download" download="'+esc(doc["folio"])+'.xlsx" href="/api/comercial/documento/excel?id='+esc(doc["id"])+'&amp;canal='+esc(channel)+'">Descargar Excel</a><header>'+header+'</header><p>'+subtitle+'<br>'+esc(doc['fecha'][:19])+' · '+esc(doc['estado'])+'</p><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table><p>Subtotal $'+esc(doc['base'])+'<br>IVA incluido $'+esc(doc['impuesto'])+'</p><p class="total">TOTAL $'+esc(doc['total'])+'</p>'+('<p>Recibido $'+esc(doc['pago']['recibido'])+' · Cambio $'+esc(doc['pago']['cambio'])+'</p>' if ticket and doc.get('modo')!='TICKETS' else '<p>'+esc(doc.get('condiciones',''))+'</p>')+'<div class="sign">Recibió / Firma</div></html>').encode()
+ return ('<!doctype html><html lang="es"><meta charset="utf-8"><title>'+esc(doc['folio'])+'</title><style>'+css+'table{width:100%;border-collapse:collapse}td,th{padding:6px 2px;border-bottom:1px solid #ddd;text-align:left}small{display:block;font-size:.8em}.total{text-align:right;font-weight:bold;font-size:1.3em}.sign{margin-top:35px;border-top:1px solid #555;text-align:center}@media print{button,.download{display:none}}</style><button onclick="window.print()">Imprimir / Guardar PDF</button> '+print_options+'<a class="download" download="'+esc(doc["folio"])+'.xlsx" href="/api/comercial/documento/excel?id='+esc(doc["id"])+'&amp;canal='+esc(channel)+'">Descargar Excel</a><header>'+header+'</header><p>'+subtitle+'<br>'+esc(display_date(doc['fecha']))+' · '+esc(doc['estado'])+'</p><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table><p>Subtotal $'+esc(doc['base'])+tax_detail+'</p><p class="total">TOTAL $'+esc(doc['total'])+'</p>'+('<p>Recibido $'+esc(doc['pago']['recibido'])+' · Cambio $'+esc(doc['pago']['cambio'])+'</p>' if channel=='expendios' and doc.get('modo')!='TICKETS' else '<p>'+esc(doc.get('condiciones',''))+'</p>')+'<div class="sign">Recibió / Firma</div></html>').encode()
 
-COLUMNS={'folio':'Folio','fecha':'Fecha','estado':'Estado','sucursal':'Sucursal','cliente':'Cliente','sku':'SKU','descripcion':'Descripción','cantidad':'Cantidad','unidad':'Unidad','precio':'Precio con IVA','iva':'IVA %','base':'Subtotal','impuesto':'IVA incluido','total':'Total'}
+COLUMNS={'folio':'Folio','fecha':'Fecha emisión','fechaPedido':'Fecha pedido','fechaEntrega':'Fecha entrega','estado':'Estado','sucursal':'Sucursal','caja':'Caja','cliente':'Cliente','sku':'SKU','descripcion':'Descripción','cantidad':'Cantidad','unidad':'Unidad','precio':'Precio con impuesto','iva':'Tasa %','tipoImpuesto':'Tipo impuesto','base':'Subtotal','impuesto':'Impuesto incluido','ieps':'IEPS incluido','importeIva':'IVA incluido','total':'Total'}
 
 def report_rows(result,columns=None,selection=None):
  columns=columns or list(COLUMNS)
@@ -31,7 +37,7 @@ def report_rows(result,columns=None,selection=None):
   if doc['estado']=='CANCELADO':continue
   total+=Decimal(doc['total'])
   for line in doc['partidas']:
-   v={**doc,**line,'descripcion':line['nombre'],'cliente':(doc.get('cliente') or {}).get('nombre','Público general')};rows.append([str(v.get(c,'')) for c in columns])
+   v={**doc,**line,'caja':' · '.join(v for v in (doc.get('cajaCodigo',''),doc.get('cajaNombre','')) if v) or doc.get('caja',''),'tipoImpuesto':tax_name(line.get('iva')),'ieps':line['impuesto'] if tax_name(line.get('iva'))=='IEPS' else '0.00','importeIva':line['impuesto'] if tax_name(line.get('iva'))=='IVA' else '0.00','fechaPedido':display_date(doc.get('fechaPedido',doc['fecha'][:10])) if doc.get('tipo')!='VENTA' else '','fechaEntrega':display_date(doc.get('fechaEntrega','')),'fecha':display_date(doc['fecha'][:10]),'descripcion':line['nombre'],'cliente':(doc.get('cliente') or {}).get('nombre','Público general')};rows.append([str(v.get(c,'')) for c in columns])
  rows.append([str(total) if c=='total' else 'GRAN TOTAL' if i==0 else '' for i,c in enumerate(columns)])
  return rows
 
@@ -49,7 +55,7 @@ def report_xlsx(rows,sheet_name="Reporte"):
   return value
  def cell(v,i,j):
   ref=column(j)+str(i)
-  numeric=i>1 and rows[0][j-1] in ('Cantidad','Precio con IVA','IVA %','Subtotal','IVA incluido','Total','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO') and re.fullmatch(r'\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
+  numeric=i>1 and rows[0][j-1] in ('Cantidad','Precio con IVA','Precio con impuesto','Tasa %','IVA %','Subtotal','IVA incluido','IEPS incluido','Impuesto incluido','Total','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO') and re.fullmatch(r'\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
   return '<c r="'+ref+'"><v>'+v+'</v></c>' if numeric else '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+escape(v)+'</t></is></c>'
  sheet='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join('<row r="'+str(i)+'">'+''.join(cell(v,i,j) for j,v in enumerate(row,1))+'</row>' for i,row in enumerate(rows,1))+'</sheetData></worksheet>'
  out=io.BytesIO()
