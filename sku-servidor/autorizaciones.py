@@ -46,6 +46,7 @@ class WorkflowStore:
     if not q.is_finite() or not 0<=q<=decimal.Decimal(original[line['materialId']]['cantidad']) or q.as_tuple().exponent < -6:raise ValueError('El surtido debe estar entre cero y lo solicitado, con hasta seis decimales. Para entregar más solicita una corrección autorizada.')
     seen.add(line['materialId']);actual.append({'materialId':line['materialId'],'cantidadSurtida':format(q,'f')})
    if not any(decimal.Decimal(r['cantidadSurtida'])>0 for r in actual):raise ValueError('Registra al menos una cantidad surtida mayor a cero.')
+   if kind=='surtir' and actor['role']=='almacenista' and any(field in payload and payload[field]!=doc[field] for field in ('area','solicitante','observaciones')):raise PermissionError('Los datos originales de la requisición requieren una corrección autorizada; captura la entrega en observaciones de surtido.')
    area=payload.get('area',doc['area']);requester=text(payload.get('solicitante',doc['solicitante']),160);notes=text(payload.get('observaciones',doc['observaciones']),2000)
    if (area!=doc['area'] and area not in self.requisitions.areas.names(db=db)) or not requester:raise ValueError('Área o solicitante inválidos.')
    values={'partidas':actual,'area':area,'solicitante':requester,'observaciones':notes}
