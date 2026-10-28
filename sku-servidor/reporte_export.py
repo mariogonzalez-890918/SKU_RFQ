@@ -5,7 +5,7 @@ from xml.sax.saxutils import escape
 
 def _metadata(r):
  c=r['configuracion'];s=r['resumen']
- return [[TITLE+' v'+VERSION,c['nombre']],['Versión',VERSION],['Soporte',SUPPORT_LINE],['Generado',r['generado']],['Alcance autorizado',', '.join(r['alcance']) or 'Sin coincidencias'],['Desde / hasta',(c.get('desde') or 'Sin inicio')+' / '+(c.get('hasta') or 'Sin fin')],['Áreas',', '.join(c.get('areas',[])) or 'Todas'],['Solicitante contiene',c.get('solicitante','')],['Material / SKU contiene',c.get('material','')],['Folio contiene',c.get('folios','')],['Base de valuación',r['baseValuacion']],['Impuestos',', '.join(t['nombre']+' '+t['tasa']+'%' for t in c['impuestos']) or 'Sin impuestos adicionales'],['Requisiciones',s['requisiciones']],['Partidas',s['partidas']],['Canceladas excluidas',s.get('canceladasExcluidas',0)],['Partidas pendientes de costo',s['pendientes']],['Costo de compra valorizado',decimal.Decimal(s['base'])],['Impuestos valorizados',decimal.Decimal(s['impuestos'])],['Total valorizado'+(' PARCIAL' if s['pendientes'] else ''),decimal.Decimal(s['total'])]]
+ return [[TITLE+' v'+VERSION,c['nombre']],['Versión',VERSION],['Soporte',SUPPORT_LINE],['Generado',r['generado']],['Alcance autorizado',', '.join(r['alcance']) or 'Sin coincidencias'],['Desde / hasta',(c.get('desde') or 'Sin inicio')+' / '+(c.get('hasta') or 'Sin fin')],['Áreas',', '.join(c.get('areas',[])) or 'Todas'],['Solicitante contiene',c.get('solicitante','')],['Material / SKU contiene',c.get('material','')],['Folio contiene',c.get('folios','')],['Base de valuación',r['baseValuacion']],['Impuestos',', '.join(t['nombre']+' '+t['tasa']+'%' for t in c['impuestos']) or 'Sin impuestos adicionales'],['Requisiciones',s['requisiciones']],['Partidas',s['partidas']],['Canceladas excluidas',s.get('canceladasExcluidas',0)],['Partidas pendientes de costo',s['pendientes']],['Total requisitado',decimal.Decimal(s['totalRequisitado'])],['Total surtido',decimal.Decimal(s['totalSurtido'])],*[[q['unidad']+' requisitado / surtido',q['requisitado']+' / '+q['surtido']] for q in s['cantidadesPorUnidad']],['Costo de compra valorizado',decimal.Decimal(s['base'])],['Impuestos valorizados',decimal.Decimal(s['impuestos'])],['Total valorizado'+(' PARCIAL' if s['pendientes'] else ''),decimal.Decimal(s['total'])]]
 
 def _number(value):return decimal.Decimal(value) if value is not None else None
 
@@ -23,19 +23,21 @@ def select_detail(r,selection):
  with decimal.localcontext() as ctx:
   ctx.prec=60
   def total(key):return format(sum((decimal.Decimal(d[key]) for d in detail if d[key] is not None),decimal.Decimal(0)),'.2f')
-  summary={**r['resumen'],'base':total('costoCompra'),'impuestos':total('importeImpuestos'),'total':total('total'),'partidas':len(detail),'requisiciones':len({d['requisicionId'] for d in detail}),'pendientes':sum(bool(d['pendiente']) for d in detail)}
+  summary={**r['resumen'],'baseRequisitado':total('costoRequisitado'),'totalRequisitado':total('totalRequisitado'),'totalSurtido':total('total'),'base':total('costoCompra'),'impuestos':total('importeImpuestos'),'total':total('total'),'partidas':len(detail),'requisiciones':len({d['requisicionId'] for d in detail}),'pendientes':sum(bool(d['pendiente']) for d in detail)}
+ from reportes import quantity_totals
+ summary['cantidadesPorUnidad']=quantity_totals(detail)
  summary['completo']=not summary['pendientes']
  return {**r,'configuracion':{**r['configuracion'],'nombre':r['configuracion']['nombre']+' · '+g['grupo']},'detalle':detail,'grupos':[g],'resumen':summary,'alcance':sorted({d['sucursal'] for d in detail})}
 
 def report_xlsx(r):
  metadata=[row for row in _metadata(r) if 'impuestos' not in row[0].lower() and 'pendientes' not in row[0].lower()]
- sheets=[('Resumen',metadata,[36,110],False),('Grupos',[['GRUPO','ID MATERIAL','UNIDAD','CANTIDAD','REQUISICIONES','COSTO COMPRA','TOTAL']]+[[g['grupo'],g['materialId'] or '',g['unidad'],_number(g['cantidad']),g['requisiciones'],_number(g['base']),_number(g['total'])] for g in r['grupos']],[40,14,20,18,18,22,22],True)]
- headers=['FOLIO','FECHA','SUCURSAL','ÁREA','SOLICITANTE','SKU','DESCRIPCIÓN','CANTIDAD','UNIDAD','COSTO UNITARIO','COSTO COMPRA','TOTAL']
+ sheets=[('Resumen',metadata,[36,110],False),('Grupos',[['GRUPO','ID MATERIAL','UNIDAD','REQUISITADO','SURTIDO','REQUISICIONES','TOTAL REQUISITADO','COSTO SURTIDO','TOTAL SURTIDO']]+[[g['grupo'],g['materialId'] or '',g['unidad'],_number(g['cantidadRequisitada']),_number(g['cantidadSurtida']),g['requisiciones'],_number(g['totalRequisitado']),_number(g['base']),_number(g['total'])] for g in r['grupos']],[40,14,20,18,18,18,24,24,24],True)]
+ headers=['FOLIO','FECHA','SUCURSAL','ÁREA','SOLICITANTE','SKU','DESCRIPCIÓN','REQUISITADO','SURTIDO','UNIDAD','ESTADO','COSTO UNITARIO','TOTAL REQUISITADO','COSTO SURTIDO','TOTAL SURTIDO']
  rows=[headers]
  for d in r['detalle']:
-  rows.append([d['folio'],d['fecha'],d['sucursal'],d['area'],d['solicitante'],d['sku'],d['descripcion'],_number(d['cantidad']),d['unidad'],_number(d['costoUnitario']),_number(d['costoCompra']),_number(d['total'])])
- s=r['resumen'];rows.append(['GRAN TOTAL'+(' PARCIAL' if s['pendientes'] else '')]+['']*9+[_number(s['base']),_number(s['total'])])
- sheets.append(('Detalle',rows,[24,14,20,36,30,22,55,18,22,24,24,24],True))
+  rows.append([d['folio'],d['fecha'],d['sucursal'],d['area'],d['solicitante'],d['sku'],d['descripcion'],_number(d['cantidadRequisitada']),_number(d['cantidadSurtida']),d['unidad'],d['estado'],_number(d['costoUnitario']),_number(d['totalRequisitado']),_number(d['costoCompra']),_number(d['total'])])
+ s=r['resumen'];rows.append(['GRAN TOTAL'+(' PARCIAL' if s['pendientes'] else '')]+['']*11+[_number(s['totalRequisitado']),_number(s['base']),_number(s['totalSurtido'])])
+ sheets.append(('Detalle',rows,[24,14,20,36,30,22,55,18,18,22,18,24,24,24,24],True))
  def col(n):
   s=''
   while n:n,v=divmod(n-1,26);s=chr(65+v)+s
@@ -80,18 +82,18 @@ def report_pdf(r):
   t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#284e42')),('VALIGN',(0,0),(-1,-1),'TOP'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f3f4ef')]),('LINEBELOW',(0,0),(-1,0),.6,colors.HexColor('#284e42')),('BOTTOMPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),6),('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5)]))
   return t
  width=page[0]-50;story=[p(TITLE+' v'+VERSION,heading),p(r['configuracion']['nombre'],heading)]
- for key,value in _metadata(r)[1:-7]:story.append(p(key+': '+str(value),normal))
- s=r['resumen'];story.extend([p('Requisiciones: '+str(s['requisiciones'])+' · Partidas: '+str(s['partidas'])+' · Canceladas excluidas: '+str(s.get('canceladasExcluidas',0)),normal),p(('TOTAL PARCIAL · ' if s['pendientes'] else '')+'Costo compra: '+fmt(s['base'])+' · Impuestos: '+fmt(s['impuestos'])+' · Total valorizado: '+fmt(s['total']),normal),p('Partidas pendientes de costo o equivalencia: '+str(s['pendientes'])+'. No se consideran costo cero.',normal),Spacer(1,10)])
- groups=[['Grupo','Cantidad / unidad','Solicitudes','Costo compra','Impuestos','Total','Pendientes']]+[[g['grupo'],(g['cantidad']+' '+g['unidad']) if g['cantidad'] is not None else '—',g['requisiciones'],fmt(g['base']),fmt(g['impuestos']),fmt(g['total']),g['pendientes']] for g in r['grupos']]
- story.append(table(groups,[width*x for x in (.30,.16,.09,.13,.11,.13,.08)]))
+ for key,value in _metadata(r)[1:12]:story.append(p(key+': '+str(value),normal))
+ s=r['resumen'];story.extend([p('TOTAL REQUISITADO: '+fmt(s['totalRequisitado'])+' · TOTAL SURTIDO: '+fmt(s['totalSurtido']),normal),*[p(q['unidad']+' · Requisitado: '+q['requisitado']+' · Surtido: '+q['surtido'],normal) for q in s['cantidadesPorUnidad']],p('Requisiciones: '+str(s['requisiciones'])+' · Partidas: '+str(s['partidas'])+' · Canceladas excluidas: '+str(s.get('canceladasExcluidas',0)),normal),p(('TOTAL PARCIAL · ' if s['pendientes'] else '')+'Costo compra: '+fmt(s['base'])+' · Impuestos: '+fmt(s['impuestos'])+' · Total valorizado: '+fmt(s['total']),normal),p('Partidas pendientes de costo o equivalencia: '+str(s['pendientes'])+'. No se consideran costo cero.',normal),Spacer(1,10)])
+ groups=[['Grupo','Requisitado / surtido','Solicitudes','Total requisitado','Costo surtido','Impuestos','Total surtido','Pendientes']]+[[g['grupo'],(g['cantidadRequisitada']+' / '+g['cantidadSurtida']+' '+g['unidad']) if g['cantidad'] is not None else '—',g['requisiciones'],fmt(g['totalRequisitado']),fmt(g['base']),fmt(g['impuestos']),fmt(g['total']),g['pendientes']] for g in r['grupos']]
+ story.append(table(groups,[width*x for x in (.22,.16,.08,.13,.12,.09,.12,.08)]))
  if r['detalle']:
   story.extend([PageBreak(),p('Detalle de requisiciones',heading)])
-  rows=[['Folio / fecha','Sucursal / área','Material / SKU','Cantidad / unidad','Costo unitario','Costo compra','Impuestos','Total']]
+  rows=[['Folio / fecha','Sucursal / área','Material / SKU','Requisitado / surtido','Costo unitario','Total requisitado','Costo surtido','Impuestos','Total surtido']]
   for d in r['detalle']:
    review='\nPENDIENTE: '+d['pendiente'] if d['pendiente'] else ''
    unit_price='PENDIENTE' if d['costoUnitario'] is None else '$ '+format(decimal.Decimal(d['costoUnitario']),',.6f').rstrip('0').rstrip('.')
-   rows.append([d['folio']+'\n'+d['fecha'],d['sucursal']+'\n'+d['area']+'\n'+d['solicitante'],d['descripcion']+'\n'+(d['sku'] or 'ID '+str(d['materialId']))+review,d['cantidad']+' '+d['unidad'],unit_price,fmt(d['costoCompra']),fmt(d['importeImpuestos']),fmt(d['total'])])
-  story.append(table(rows,[width*x for x in (.12,.16,.24,.10,.10,.10,.08,.10)]))
+   rows.append([d['folio']+'\n'+d['fecha'],d['sucursal']+'\n'+d['area']+'\n'+d['solicitante'],d['descripcion']+'\n'+(d['sku'] or 'ID '+str(d['materialId']))+review,d['cantidadRequisitada']+' / '+d['cantidadSurtida']+' '+d['unidad']+'\n'+d['estado'],unit_price,fmt(d['totalRequisitado']),fmt(d['costoCompra']),fmt(d['importeImpuestos']),fmt(d['total'])])
+  story.append(table(rows,[width*x for x in (.10,.13,.20,.13,.08,.10,.10,.07,.09)]))
  def footer(canvas,document):
   canvas.saveState();canvas.setFont('Helvetica',8);canvas.setFillColor(colors.HexColor('#555555'));canvas.drawString(25,16,'GMP · '+r['generado']+' · Canceladas excluidas del costeo');canvas.drawRightString(page[0]-25,16,'Página '+str(document.page));canvas.restoreState()
  doc.build(story,onFirstPage=footer,onLaterPages=footer);return out.getvalue()

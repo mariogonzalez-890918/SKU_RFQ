@@ -39,11 +39,15 @@ class ModuleBackupTests(unittest.TestCase):
  def create_req(self,quantity='3'):
   material=self.value('/api/requisiciones/materiales')['materiales'][0]
   return self.value('/api/requisiciones',{'sucursal':'EJIDOS','area':'Produccion Donas','solicitante':'PRUEBA','observaciones':'','claveCliente':uuid.uuid4().hex,'partidas':[{'materialId':material['id'],'cantidad':quantity,'observaciones':''}]})['documento']
+ def delivered_req(self,quantity='3'):
+  doc=self.create_req(quantity)
+  self.value('/api/requisiciones/cambios',{'tipo':'surtir','objetivo':doc['id'],'revision':1,'motivo':'Entrega de prueba','datos':{'partidas':[{'materialId':doc['partidas'][0]['materialId'],'cantidadSurtida':quantity}]}})
+  return doc
  def review(self,module,backup):return self.value('/api/respaldos/restaurar/revisar',{'modulo':module,'respaldo':backup})
  def restore(self,module,backup,review):return self.value('/api/respaldos/restaurar/confirmar',{'modulo':module,'respaldo':backup,'huellaActual':review['huellaActual'],'confirmar':True})
  def test_detail_excel_selection_and_grand_total(self):
   import xml.etree.ElementTree as ET
-  self.import_req([product()]);first=self.create_req('2');self.create_req('3')
+  self.import_req([product()]);first=self.delivered_req('2');self.delivered_req('3')
   config=self.value('/api/requisiciones/reportes/general/ejecutar')['configuracion'];config['agrupacion']='requisicion';config['impuestos']=[{'nombre':'IVA','tasa':'16'}]
   result=self.value('/api/requisiciones/reportes/vista-previa',config)
   self.assertEqual(result['resumen']['total'],'58.00');group=next(g for g in result['grupos'] if g['grupo']==first['numero'])
@@ -57,8 +61,8 @@ class ModuleBackupTests(unittest.TestCase):
    self.assertIn(first['numero'],''.join(rows[1].itertext()))
    self.assertIn('GRAN TOTAL',''.join(rows[-1].itertext()))
    values={c.attrib['r']:''.join(c.itertext()) for c in rows[-1]}
-   self.assertEqual(values['K3'],'20.00');self.assertEqual(values['L3'],'23.20')
-   self.assertEqual(xml.find('s:autoFilter',ns).attrib['ref'],'A1:L2')
+   self.assertEqual(values['N3'],'20.00');self.assertEqual(values['O3'],'23.20')
+   self.assertEqual(xml.find('s:autoFilter',ns).attrib['ref'],'A1:O2')
    self.assertNotIn('ORIGEN',''.join(rows[0].itertext()))
    for name in ('sheet1','sheet2','sheet3'):
     content=''.join(ET.fromstring(z.read('xl/worksheets/'+name+'.xml')).itertext()).upper()
@@ -75,8 +79,8 @@ class ModuleBackupTests(unittest.TestCase):
   status,raw,_=self.call('/api/compras/excel');self.assertEqual(status,200);rows,_=requisiciones.read_rows(raw,'descarga.xlsx');self.assertEqual(rows[0][1]['D'],'SKU NUEVO');self.assertEqual(rows[1][1]['D'],after['sku']);self.assertEqual(rows[1][1]['I'],'100');self.assertEqual(rows[1][1]['N'],'KILO')
   bad={'archivo':'OTRA.xlsx','contenido':workbook([row],sheet='OTRA'),'revision':self.value('/api/catalogo')['revision']};self.assertEqual(self.call('/api/compras/importar',bad)[0],400)
  def test_um_entrega_cost_and_historical_unit_conversion(self):
-  row=product();self.import_req([row]);first=self.value('/api/requisiciones/materiales')['materiales'][0];self.assertEqual(first['unidad'],'KILO');doc=self.create_req();self.assertEqual(doc['partidas'][0]['unidad'],'KILO');report=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(report['resumen']['base'],'30.00');self.assertEqual(report['detalle'][0]['costoUnitario'],'10')
-  row['N']='GRAMO';self.import_req([row]);updated=self.value('/api/requisiciones/materiales')['materiales'];self.assertEqual(len(updated),1);self.assertEqual(updated[0]['id'],first['id']);self.assertEqual(updated[0]['unidad'],'GRAMO');self.assertEqual(self.value('/api/requisiciones/'+doc['id'])['partidas'][0]['unidad'],'KILO');self.assertEqual(self.value('/api/requisiciones/reportes/general/ejecutar')['resumen']['base'],'30.00');self.create_req('100');self.assertEqual(self.value('/api/requisiciones/reportes/general/ejecutar')['resumen']['base'],'31.00')
+  row=product();self.import_req([row]);first=self.value('/api/requisiciones/materiales')['materiales'][0];self.assertEqual(first['unidad'],'KILO');doc=self.delivered_req();self.assertEqual(doc['partidas'][0]['unidad'],'KILO');report=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(report['resumen']['base'],'30.00');self.assertEqual(report['detalle'][0]['costoUnitario'],'10')
+  row['N']='GRAMO';self.import_req([row]);updated=self.value('/api/requisiciones/materiales')['materiales'];self.assertEqual(len(updated),1);self.assertEqual(updated[0]['id'],first['id']);self.assertEqual(updated[0]['unidad'],'GRAMO');self.assertEqual(self.value('/api/requisiciones/'+doc['id'])['partidas'][0]['unidad'],'KILO');self.assertEqual(self.value('/api/requisiciones/reportes/general/ejecutar')['resumen']['base'],'30.00');self.delivered_req('100');self.assertEqual(self.value('/api/requisiciones/reportes/general/ejecutar')['resumen']['base'],'31.00')
   row['L']='0';self.import_req([row]);report=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(report['resumen']['pendientes'],2);self.assertFalse(report['resumen']['completo']);self.assertEqual(report['resumen']['base'],'0.00')
  def test_multiple_renames_do_not_leave_stale_matching_keys(self):
   self.import_purchase([product('ANTES UNO'),product('ANTES DOS')]);old=self.value('/api/catalogo')['state']['registros'];rows=[product('NUEVO UNO',B=old[0]['sku']),product('NUEVO DOS',B=old[1]['sku']),product('ANTES UNO')];first=self.import_purchase(rows);self.assertEqual(first['resumen']['agregados'],1);second=self.import_purchase(rows);self.assertEqual(second['resumen']['agregados'],0);self.assertEqual(len(self.value('/api/catalogo')['state']['registros']),3)
@@ -85,7 +89,7 @@ class ModuleBackupTests(unittest.TestCase):
  def test_duplicated_legacy_code_does_not_merge_different_products(self):
   rows=[product('ARTICULO UNO',AD='ANTIGUO_REPETIDO'),product('ARTICULO DOS',AD='ANTIGUO_REPETIDO')];self.assertEqual(self.import_purchase(rows)['resumen']['agregados'],2);self.assertEqual(self.import_purchase(rows)['resumen']['agregados'],0)
  def test_costo_header_has_priority_and_uom_aliases(self):
-  headers={**HEADERS,'M':'UOM_COMPRA','N':'UOM_ENTREGA','K':'COSTO'};self.value('/api/requisiciones/maestro',{'archivo':'COSTO.xlsx','contenido':workbook([product(K='7.25')],headers=headers)});doc=self.create_req();self.assertEqual(doc['partidas'][0]['unidad'],'KILO');r=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(r['resumen']['base'],'21.75');self.assertEqual(r['detalle'][0]['costoUnitario'],'7.25')
+  headers={**HEADERS,'M':'UOM_COMPRA','N':'UOM_ENTREGA','K':'COSTO'};self.value('/api/requisiciones/maestro',{'archivo':'COSTO.xlsx','contenido':workbook([product(K='7.25')],headers=headers)});doc=self.delivered_req();self.assertEqual(doc['partidas'][0]['unidad'],'KILO');r=self.value('/api/requisiciones/reportes/general/ejecutar');self.assertEqual(r['resumen']['base'],'21.75');self.assertEqual(r['detalle'][0]['costoUnitario'],'7.25')
  def test_sales_reset_can_reimport_same_validated_historical_sku(self):
   sku='PTPB19'+'TEST000'+'0';master=workbook([{'A':sku,'B':'PRODUCTO TERMINADO','C':'PAN BLANCO','D':'PAN BLANCO','H':'PAN PRUEBA'}],sheet='SUGERIDO',headers={'A':'SKU','B':'PRODUCTOS Y SERVICIOS','C':'CATEGORIA','D':'SUBCATEGORIA','H':'DESCRIPCION'})
   self.value('/api/ventas/importar',{'revision':self.value('/api/ventas')['revision'],'master':master});review=self.value('/api/respaldos/vaciar/revisar',{'modulo':'ventas'});self.value('/api/respaldos/vaciar/confirmar',{'modulo':'ventas','huellaActual':review['huellaActual'],'confirmar':True,'texto':'VACIAR'});self.assertEqual(self.value('/api/ventas')['state']['registros'],[]);self.value('/api/ventas/importar',{'revision':self.value('/api/ventas')['revision'],'master':master});self.assertEqual(self.value('/api/ventas')['state']['registros'][0]['sku'],sku)

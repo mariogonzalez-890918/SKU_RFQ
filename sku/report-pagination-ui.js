@@ -7,8 +7,8 @@ $('rpDetalleAnterior').onclick=()=>{if(rpDetailPage>0){rpDetailPage--;rpDrawDeta
 function rpUpdateDetailTotal(lines){
  const sum=key=>{let cents=0n;for(const line of lines){if(line[key]===null||line[key]===undefined)continue;const [whole,fraction='']=String(line[key]).split('.');cents+=BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0').slice(0,2));}return (cents/100n).toString()+'.'+(cents%100n).toString().padStart(2,'0');};
  const pending=lines.filter(line=>line.pendiente).length;
- $('rpGranTotalEtiqueta').textContent=pending?'Gran total parcial':'Gran total';
+ $('rpGranTotalEtiqueta').textContent=pending?'Total surtido parcial':'Total surtido';
  $('rpGranTotal').textContent=rpMoney(sum('total'));
- $('rpTotalDesglose').textContent=lines.length+' partidas · Costo compra: '+rpMoney(sum('costoCompra'))+' · Impuestos: '+rpMoney(sum('importeImpuestos'))+(pending?' · '+pending+' partidas pendientes de costeo':'')+' · Incluye todas las páginas del detalle seleccionado.';
+ $('rpTotalDesglose').textContent=lines.length+' partidas · Total requisitado: '+rpMoney(sum('totalRequisitado'))+' · Costo surtido: '+rpMoney(sum('costoCompra'))+' · Impuestos: '+rpMoney(sum('importeImpuestos'))+(pending?' · '+pending+' partidas pendientes de costeo':'')+' · Incluye todas las páginas del detalle seleccionado.';
  $('rpDetalleExcel').disabled=!lines.length;
 }

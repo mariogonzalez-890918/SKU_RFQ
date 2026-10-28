@@ -1,4 +1,4 @@
-# RFQ_SKU_GMP · Versión 1.7.0
+# RFQ_SKU_GMP · Versión 1.8.0
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
@@ -98,4 +98,6 @@ Esta prueba utiliza datos vacíos y credenciales aleatorias temporales. Las guí
 | `tests/` | Verificación de instalación limpia |
 
 
-Requisición y Almacenista solicitan aprobación o cancelación desde el detalle. Superadministrador, AUXTI y Gerente autorizan; se conserva el folio y el historial. Almacenista registra cantidades realmente surtidas en UM_ENTREGA después de aprobarse la requisición y la marca SURTIDA. Solicitado y surtido se muestran por separado, también en ambas impresiones, sin mostrar costos al perfil Requisición. El costeo conserva su base de cantidad solicitada; las canceladas siguen excluidas.
+Requisición y Almacenista solicitan aprobación o cancelación desde el detalle. Superadministrador, AUXTI y Gerente autorizan; se conserva el folio y el historial. Almacenista y los perfiles administrativos aprueban capturando cantidades realmente surtidas en UM_ENTREGA y la marca SURTIDO. Solicitado y surtido se muestran por separado, también en ambas impresiones, sin mostrar costos al perfil Requisición. El costeo usa lo realmente surtido y compara su total contra lo requisitado; las canceladas siguen excluidas.
+
+Versión 1.8.0: Almacenista, Superadministrador, Gerencia y AUXTI aprueban capturando las cantidades realmente surtidas y el estado SURTIDO. El almacenista solicita correcciones de surtidos con autorización; los administradores y gerencia las aplican directamente. Reportes y descargas comparan total requisitado y total surtido; el costeo usa el surtido real y las cantidades se agrupan por unidad, sin sumar unidades incompatibles. Sin captura de entrega, el surtido es cero.

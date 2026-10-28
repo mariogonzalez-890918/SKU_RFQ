@@ -96,6 +96,7 @@ class RequisitionStore:
    db.execute('CREATE TABLE IF NOT EXISTS req_branches(branch TEXT PRIMARY KEY,series TEXT UNIQUE NOT NULL,next_folio INTEGER NOT NULL,revision INTEGER NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS req_series_registry(series TEXT PRIMARY KEY,branch TEXT NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS req_documents(id TEXT PRIMARY KEY,creator TEXT NOT NULL,client_key TEXT NOT NULL,fingerprint TEXT NOT NULL,branch TEXT NOT NULL,series TEXT NOT NULL,folio INTEGER NOT NULL,number TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(creator,client_key))')
+   db.execute("UPDATE req_documents SET payload=json_set(payload,'$.estado','SURTIDO') WHERE json_extract(payload,'$.estado')='SURTIDA'")
    db.execute('CREATE INDEX IF NOT EXISTS req_documents_branch_date ON req_documents(branch,created_at)')
    db.execute('CREATE INDEX IF NOT EXISTS req_documents_date ON req_documents(created_at)')
    db.execute('CREATE INDEX IF NOT EXISTS req_documents_creator_date ON req_documents(creator,created_at)')

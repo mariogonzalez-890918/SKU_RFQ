@@ -11,6 +11,13 @@ def dec(value,positive=False):
   if not result.is_finite() or result<0 or result>D('1000000000000000') or result.as_tuple().exponent < -18 or positive and result<=0:raise ValueError()
   return result
  except (ValueError,decimal.InvalidOperation,TypeError):raise ValueError('Importe o equivalencia inválidos.')
+def quantity_totals(details):
+ groups={}
+ for d in details:
+  key=d['unidad'];g=groups.setdefault(key,{'unidad':key,'requisitado':D(0),'surtido':D(0)})
+  g['requisitado']+=D(d['cantidadRequisitada']);g['surtido']+=D(d['cantidadSurtida'])
+ return [{k:format(v,'f') if isinstance(v,D) else v for k,v in g.items()} for g in groups.values()]
+
 def money(value):return str(value.quantize(CENT,rounding=decimal.ROUND_HALF_UP))
 def unit(value):
  n=norm(value);aliases={'PIEZAS':'PIEZA','PZA':'PIEZA','PZAS':'PIEZA','PZS':'PIEZA','KG':'KILOGRAMO','KGS':'KILOGRAMO','KILO':'KILOGRAMO','KILOS':'KILOGRAMO','KILOGRAMOS':'KILOGRAMO','LT':'LITRO','LTS':'LITRO','LITROS':'LITRO','GR':'GRAMO','GRS':'GRAMO','GRAMOS':'GRAMO','ML':'MILILITRO','MILILITROS':'MILILITRO','PAQ':'PAQUETE','BOLSAS':'BOLSA'}
@@ -198,7 +205,7 @@ class ReportStore:
      continue
     docs.append(doc)
     if len(docs)>20000:raise ValueError('El reporte supera 20,000 requisiciones. Reduce el rango de fechas.')
-  costs={r['materialId']:r for r in self.costs()};details=[];groups={};totals={'base':D(0),'impuestos':D(0),'total':D(0),'pendientes':0,'partidas':0};doc_ids=set()
+  costs={r['materialId']:r for r in self.costs()};details=[];groups={};totals={'baseRequisitado':D(0),'totalRequisitado':D(0),'base':D(0),'impuestos':D(0),'total':D(0),'pendientes':0,'partidas':0};doc_ids=set()
   for doc in docs:
    for index,line in enumerate(doc['partidas']):
     if c['material'] and norm(c['material']) not in norm(line['nombre']+' '+line['sku']):continue
@@ -214,23 +221,27 @@ class ReportStore:
       numerator=dec(cost['costoEntrega'])*dec(cost['factor'],True) if cost.get('costoEntrega') not in (None,'') else dec(cost['precioCompra']);value=numerator/factor_line;reason=''
      else:reason='La unidad histórica de la requisición requiere confirmar su equivalencia.'
     elif cost:reason=cost['motivo']
-    quantity=dec(line['cantidad'],True);base=(quantity*numerator/factor_line).quantize(CENT,rounding=decimal.ROUND_HALF_UP) if value is not None else None
+    requested=dec(line['cantidad'],True);quantity=dec(line.get('cantidadSurtida','0'));requested_base=(requested*numerator/factor_line).quantize(CENT,rounding=decimal.ROUND_HALF_UP) if value is not None else None
+    requested_total=requested_base+sum(((requested_base*dec(t['tasa'])/100).quantize(CENT,rounding=decimal.ROUND_HALF_UP) for t in c['impuestos']),D(0)) if requested_base is not None else None
+    base=D(0) if quantity==0 else (quantity*numerator/factor_line).quantize(CENT,rounding=decimal.ROUND_HALF_UP) if value is not None else None
     tax_values=[{'nombre':t['nombre'],'tasa':t['tasa'],'importe':money(base*dec(t['tasa'])/100) if base is not None else None} for t in c['impuestos']]
     tax=sum((D(t['importe']) for t in tax_values),D(0)) if base is not None else None;total=base+tax if base is not None else None
-    detail={'requisicionId':doc['id'],'folio':doc['numero'],'fecha':doc['fecha'],'sucursal':doc['sucursal'],'area':doc['area'],'solicitante':doc['solicitante'],'materialId':line['materialId'],'sku':line['sku'],'descripcion':line['nombre'],'cantidad':line['cantidad'],'unidad':line['unidad'],'costoUnitario':format(value,'f') if value is not None else None,'costoCompra':money(base) if base is not None else None,'impuestos':tax_values,'importeImpuestos':money(tax) if tax is not None else None,'total':money(total) if total is not None else None,'pendiente':reason,'origenCosto':cost['origen'] if cost else 'Sin costo'}
-    details.append(detail);doc_ids.add(doc['id']);totals['partidas']+=1;totals['pendientes']+=int(base is None)
+    detail={'requisicionId':doc['id'],'folio':doc['numero'],'fecha':doc['fecha'],'sucursal':doc['sucursal'],'area':doc['area'],'solicitante':doc['solicitante'],'materialId':line['materialId'],'sku':line['sku'],'descripcion':line['nombre'],'estado':doc['estado'],'cantidadRequisitada':line['cantidad'],'cantidadSurtida':format(quantity,'f'),'cantidad':format(quantity,'f'),'costoRequisitado':money(requested_base) if requested_base is not None else None,'totalRequisitado':money(requested_total) if requested_total is not None else None,'unidad':line['unidad'],'costoUnitario':format(value,'f') if value is not None else None,'costoCompra':money(base) if base is not None else None,'impuestos':tax_values,'importeImpuestos':money(tax) if tax is not None else None,'total':money(total) if total is not None else None,'pendiente':reason,'origenCosto':cost['origen'] if cost else 'Sin costo'}
+    details.append(detail);doc_ids.add(doc['id']);totals['partidas']+=1;totals['pendientes']+=int(value is None)
     label={'general':'General','sucursal':doc['sucursal'],'area':doc['area'],'requisicion':doc['numero'],'material':line['nombre'],'unidad':line['unidad']}[c['agrupacion']]
     key=(label,line['materialId'] if c['agrupacion']=='material' else None,line['unidad'] if c['agrupacion'] in ('material','unidad') else None)
-    g=groups.setdefault(key,{'grupo':label,'materialId':line['materialId'] if c['agrupacion']=='material' else None,'unidad':line['unidad'] if c['agrupacion'] in ('material','unidad') else '', 'cantidad':D(0) if c['agrupacion'] in ('material','unidad') else None,'base':D(0),'impuestos':D(0),'total':D(0),'pendientes':0,'partidas':0,'requisiciones':set()})
-    g['partidas']+=1;g['pendientes']+=int(base is None);g['requisiciones'].add(doc['id'])
-    if g['cantidad'] is not None:g['cantidad']+=quantity
+    g=groups.setdefault(key,{'grupo':label,'materialId':line['materialId'] if c['agrupacion']=='material' else None,'unidad':line['unidad'] if c['agrupacion'] in ('material','unidad') else '', 'cantidadRequisitada':D(0) if c['agrupacion'] in ('material','unidad') else None,'baseRequisitado':D(0),'totalRequisitado':D(0),'cantidad':D(0) if c['agrupacion'] in ('material','unidad') else None,'base':D(0),'impuestos':D(0),'total':D(0),'pendientes':0,'partidas':0,'requisiciones':set()})
+    g['partidas']+=1;g['pendientes']+=int(value is None);g['requisiciones'].add(doc['id'])
+    if g['cantidad'] is not None:g['cantidad']+=quantity;g['cantidadRequisitada']+=requested
+    if requested_base is not None:
+     for obj in (totals,g):obj['baseRequisitado']+=requested_base;obj['totalRequisitado']+=requested_total
     if base is not None:
      for obj in (totals,g):obj['base']+=base;obj['impuestos']+=tax;obj['total']+=total
   result_groups=[]
-  for g in groups.values():result_groups.append({**g,'cantidad':format(g['cantidad'],'f') if g['cantidad'] is not None else None,'requisiciones':len(g['requisiciones']),**{k:money(g[k]) for k in ('base','impuestos','total')}})
-  summary={**totals,**{k:money(totals[k]) for k in ('base','impuestos','total')},'requisiciones':len(doc_ids),'canceladasExcluidas':cancelled,'completo':totals['pendientes']==0}
-  return {'configuracion':c,'generado':now(),'baseValuacion':'COSTO del maestro por UM/UOM_ENTREGA × cantidad solicitada. Si COSTO está vacío se calcula con precio de compra/equivalencia. Costo vigente, no histórico de emisión.','alcance':branches,'resumen':summary,'grupos':result_groups,'detalle':details}
+  for g in groups.values():result_groups.append({**g,'cantidad':format(g['cantidad'],'f') if g['cantidad'] is not None else None,'cantidadSurtida':format(g['cantidad'],'f') if g['cantidad'] is not None else None,'cantidadRequisitada':format(g['cantidadRequisitada'],'f') if g['cantidadRequisitada'] is not None else None,'totalSurtido':money(g['total']),'requisiciones':len(g['requisiciones']),**{k:money(g[k]) for k in ('base','impuestos','total','baseRequisitado','totalRequisitado')}})
+  summary={**totals,**{k:money(totals[k]) for k in ('base','impuestos','total','baseRequisitado','totalRequisitado')},'totalSurtido':money(totals['total']),'cantidadesPorUnidad':quantity_totals(details),'requisiciones':len(doc_ids),'canceladasExcluidas':cancelled,'completo':totals['pendientes']==0}
+  return {'configuracion':c,'generado':now(),'baseValuacion':'COSTO del maestro por UM/UOM_ENTREGA × cantidad realmente surtida. Se compara total requisitado contra total surtido; sin entrega registrada, surtido es cero. Si COSTO está vacío se calcula con precio de compra/equivalencia. Costo vigente, no histórico de emisión.','alcance':branches,'resumen':summary,'grupos':result_groups,'detalle':details}
 def report_csv(report):
- rows=[['FOLIO','FECHA','SUCURSAL','AREA','SOLICITANTE','SKU','DESCRIPCION','CANTIDAD','UNIDAD','COSTO UNITARIO COMPRA','COSTO COMPRA SIN IMPUESTOS','IMPUESTOS','TOTAL','PENDIENTE']]
- rows += [[r['folio'],r['fecha'],r['sucursal'],r['area'],r['solicitante'],r['sku'],r['descripcion'],r['cantidad'],r['unidad'],r['costoUnitario'] if r['costoUnitario'] is not None else '',r['costoCompra'] if r['costoCompra'] is not None else '',r['importeImpuestos'] if r['importeImpuestos'] is not None else '',r['total'] if r['total'] is not None else '',r['pendiente']] for r in report['detalle']]
+ rows=[['FOLIO','FECHA','SUCURSAL','AREA','SOLICITANTE','SKU','DESCRIPCION','REQUISITADO','SURTIDO','UNIDAD','ESTADO','COSTO UNITARIO','TOTAL REQUISITADO','COSTO SURTIDO','TOTAL SURTIDO']]
+ rows += [[r[k] if r[k] is not None else '' for k in ('folio','fecha','sucursal','area','solicitante','sku','descripcion','cantidadRequisitada','cantidadSurtida','unidad','estado','costoUnitario','totalRequisitado','costoCompra','total')] for r in report['detalle']]
  return csv_bytes(rows)

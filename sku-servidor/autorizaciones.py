@@ -26,17 +26,18 @@ class WorkflowStore:
  def _prepare(self,db,data,actor):
   kind=data.get('tipo');reason=text(data.get('motivo',''),1000)
   if not reason:raise ValueError('Escribe el motivo del cambio.')
-  if kind not in ('cancelar','modificar','aprobar','surtir'):raise ValueError('Tipo de cambio inválido. Los costos solo los editan Gerente y Superadministrador.')
+  if kind not in ('cancelar','modificar','aprobar','surtir','corregir_surtido'):raise ValueError('Tipo de cambio inválido. Los costos solo los editan Gerente y Superadministrador.')
   id=data.get('objetivo');doc=self._document(db,id,actor);revision=data.get('revision')
   if type(revision) is not int or revision!=doc.get('revision',1):raise Conflict('La solicitud cambió. Ábrela de nuevo antes de proponer el cambio.')
   if doc['estado']=='CANCELADA':raise ValueError('La solicitud ya está cancelada; el folio permanece reservado.')
   values={}
   if kind=='aprobar' and doc['estado']!='SOLICITADA':raise Conflict('Solo se aprueban requisiciones solicitadas.')
-  if kind=='surtir':
-   if actor['role']!='almacenista':raise PermissionError('Solo Almacenista registra lo realmente surtido.')
-   if doc['estado']!='APROBADA':raise Conflict('Primero debe aprobarse la requisición para registrar el surtido.')
+  if kind in ('surtir','corregir_surtido'):
+   if actor['role'] not in APPROVERS|{'almacenista'}:raise PermissionError('Solo Almacenista, Superadministrador, Gerencia o AUXTI registran el surtido.')
+   if kind=='surtir' and doc['estado'] not in ('SOLICITADA','APROBADA'):raise Conflict('La requisición ya tiene un surtido registrado. Solicita un cambio.')
+   if kind=='corregir_surtido' and doc['estado'] not in ('SURTIDO','SURTIDA'):raise Conflict('Solo se corrigen entregas ya surtidas.')
    payload=data.get('datos');lines=payload.get('partidas') if isinstance(payload,dict) else None
-   if not isinstance(payload,dict) or set(payload)!={'partidas'} or not isinstance(lines,list) or len(lines)!=len(doc['partidas']):raise ValueError('Captura el surtido de todas las partidas.')
+   if not isinstance(payload,dict) or set(payload)-{'partidas','area','solicitante','observaciones'} or not isinstance(lines,list) or len(lines)!=len(doc['partidas']):raise ValueError('Captura el surtido de todas las partidas.')
    original={line['materialId']:line for line in doc['partidas']};seen=set();actual=[]
    for line in lines:
     if not isinstance(line,dict) or set(line)!={'materialId','cantidadSurtida'} or type(line.get('materialId')) is not int or line['materialId'] not in original or line['materialId'] in seen or isinstance(line.get('cantidadSurtida'),bool):raise ValueError('Partida de surtido inválida o repetida.')
@@ -45,9 +46,11 @@ class WorkflowStore:
     if not q.is_finite() or not 0<=q<=decimal.Decimal(original[line['materialId']]['cantidad']) or q.as_tuple().exponent < -6:raise ValueError('El surtido debe estar entre cero y lo solicitado, con hasta seis decimales. Para entregar más solicita una corrección autorizada.')
     seen.add(line['materialId']);actual.append({'materialId':line['materialId'],'cantidadSurtida':format(q,'f')})
    if not any(decimal.Decimal(r['cantidadSurtida'])>0 for r in actual):raise ValueError('Registra al menos una cantidad surtida mayor a cero.')
-   values={'partidas':actual}
+   area=payload.get('area',doc['area']);requester=text(payload.get('solicitante',doc['solicitante']),160);notes=text(payload.get('observaciones',doc['observaciones']),2000)
+   if (area!=doc['area'] and area not in self.requisitions.areas.names(db=db)) or not requester:raise ValueError('Área o solicitante inválidos.')
+   values={'partidas':actual,'area':area,'solicitante':requester,'observaciones':notes}
   if kind=='modificar':
-   if doc['estado']=='SURTIDA':raise Conflict('La requisición ya tiene surtido registrado. Su entrega e historial se conservan.')
+   if doc['estado'] in ('SURTIDO','SURTIDA'):raise Conflict('La requisición ya tiene surtido registrado. Su entrega e historial se conservan.')
    values=data.get('datos')
    if not isinstance(values,dict) or set(values)-{'area','solicitante','observaciones','partidas'}:raise ValueError('Solo pueden corregirse área, solicitante, observaciones y partidas. Fecha, sucursal, SKU y folio se conservan.')
    area=values.get('area');requester=text(values.get('solicitante',''),160);notes=text(values.get('observaciones',''),2000);lines=values.get('partidas')
@@ -75,11 +78,15 @@ class WorkflowStore:
   revision=doc.get('revision',1);db.execute('INSERT INTO req_document_versions VALUES(?,?,?)',(doc['id'],revision,json.dumps(doc,ensure_ascii=False)))
   if change['tipo']=='cancelar':doc['estado']='CANCELADA';doc['cancelacion']={'motivo':change['motivo'],'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
   elif change['tipo']=='aprobar':doc['estado']='APROBADA';doc['aprobacion']={'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
-  elif change['tipo']=='surtir':
-   if doc['estado']!='APROBADA':raise Conflict('La requisición debe estar aprobada antes de surtir.')
+  elif change['tipo'] in ('surtir','corregir_surtido'):
+   if change['tipo']=='surtir' and doc['estado'] not in ('SOLICITADA','APROBADA'):raise Conflict('La requisición ya tiene un surtido registrado.')
+   if change['tipo']=='corregir_surtido' and doc['estado'] not in ('SURTIDO','SURTIDA'):raise Conflict('La requisición no está surtida.')
+   if doc['estado']=='SOLICITADA':doc['aprobacion']={'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
+   for field in ('area','solicitante','observaciones'):
+    if field in change['datos']:doc[field]=change['datos'][field]
    actual={r['materialId']:r['cantidadSurtida'] for r in change['datos']['partidas']}
    for line in doc['partidas']:line['cantidadSurtida']=actual[line['materialId']]
-   doc['estado']='SURTIDA';doc['surtido']={'fecha':now(),'registradoPor':actor['email'],'observaciones':change['motivo']}
+   doc['estado']='SURTIDO';doc['surtido']={'fecha':now(),'registradoPor':actor['email'],'observaciones':change['motivo']}
   else:
    doc.update(change['datos'])
    if doc['estado']=='APROBADA':doc['estado']='SOLICITADA';doc.pop('aprobacion',None)
@@ -95,7 +102,12 @@ class WorkflowStore:
    result=None
    old=self._document(db,c['objetivo'],actor);removed=c['tipo']=='modificar' and bool({r['materialId'] for r in old['partidas']}-{r['materialId'] for r in c['datos'].get('partidas',[])})
    c['requiereSistemas']=actor['role']=='auxti' and removed
-   if c['tipo']=='surtir' or actor['role'] in EDITORS or actor['role']=='auxti' and not removed:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido registrado por Almacenista.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
+   if c['tipo']=='surtir' or actor['role'] in EDITORS or actor['role']=='auxti' and not removed:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido aprobado y registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
+   if c['tipo']=='surtir':
+    for pending_id,payload in db.execute("SELECT id,payload FROM req_changes WHERE status='PENDIENTE' AND json_extract(payload,'$.objetivo')=? AND json_extract(payload,'$.tipo')='aprobar'",(c['objetivo'],)).fetchall():
+     pending=json.loads(payload)
+     if pending['revision']==c['revision']:
+      pending.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Aprobación con surtido real registrado.'});db.execute('UPDATE req_changes SET status=?,payload=? WHERE id=?',('APROBADA',json.dumps(pending,ensure_ascii=False),pending_id))
    db.execute('INSERT INTO req_changes VALUES(?,?,?,?,?,?)',(c['id'],c['sucursal'],actor['email'],c['estado'],c['fecha'],json.dumps(c,ensure_ascii=False)))
   return {'cambio':c,'documento':result}
  def list(self,actor):
