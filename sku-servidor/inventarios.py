@@ -10,7 +10,7 @@ from ventas import norm
 APPROVERS={'gerente','superadmin','auxti'}
 OPERATORS=APPROVERS|{'almacenista','compras'}
 HEADERS=['SKU','DESCRIPCION','UNIDAD_ENTREGA','FISICO']
-SYSTEM_CONCEPTS={'TRASPASO_CANCELACION':'Cancelación de tránsito y devolución al origen','DEVOLUCION_PROVEEDOR':'Devolución al proveedor','INICIAL':'Inventario inicial','AJUSTE':'Ajuste por conteo físico','RECEPCION_COMPRA':'Compra recibida','CANCELACION_RECEPCION_COMPRA':'Cancelación/devolución de compra recibida','REQUISICION_SURTIDO':'Surtido de requisición','REQUISICION_DEVOLUCION':'Reversión de surtido de requisición','TRASPASO_SALIDA':'Salida a otro almacén','TRASPASO_ENTRADA':'Recepción de otro almacén','TRASPASO_DEVOLUCION':'Devolución de traspaso','RESTABLECER':'Restablecimiento autorizado'}
+SYSTEM_CONCEPTS={'TRASPASO_CANCELACION_SALIDA':'Devolución al origen por cancelación de traspaso recibido','TRASPASO_CANCELACION_ENTRADA':'Regreso por cancelación de traspaso recibido','TRASPASO_CANCELACION':'Cancelación de tránsito y devolución al origen','DEVOLUCION_PROVEEDOR':'Devolución al proveedor','INICIAL':'Inventario inicial','AJUSTE':'Ajuste por conteo físico','RECEPCION_COMPRA':'Compra recibida','CANCELACION_RECEPCION_COMPRA':'Cancelación/devolución de compra recibida','REQUISICION_SURTIDO':'Surtido de requisición','REQUISICION_DEVOLUCION':'Reversión de surtido de requisición','TRASPASO_SALIDA':'Salida a otro almacén','TRASPASO_ENTRADA':'Recepción de otro almacén','TRASPASO_DEVOLUCION':'Devolución de traspaso','RESTABLECER':'Restablecimiento autorizado'}
 
 def dec(value,positive=False):
  if isinstance(value,bool) or value is None or str(value).strip()=='':raise ValueError('Cantidad/costo requerido; una celda vacía no equivale a cero.')
@@ -330,17 +330,33 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
    return self.remember(db,data,{'ok':True,'traspaso':doc})
  def cancel_transfer(self,db,doc,data,actor):
   if actor['role'] not in APPROVERS:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador autorizan cancelaciones de traspasos.')
-  self.scope(actor,doc['origen'],db,True)
-  if doc['estado'] not in ('SOLICITADA','EN_TRANSITO','PARCIAL'):raise Conflict('Este traspaso ya está cerrado. Las cantidades recibidas requieren una devolución física mediante otro traspaso.')
+  origin=self.scope(actor,doc['origen'],db,True)
+  if doc['estado'] not in ('SOLICITADA','EN_TRANSITO','PARCIAL','RECIBIDA','CERRADA_CON_DEVOLUCION'):raise Conflict('Este traspaso ya está cancelado.')
+  return_received=data.get('devolverRecibido') is True
+  if doc['estado'] in ('RECIBIDA','CERRADA_CON_DEVOLUCION') and not return_received:raise ValueError('Confirma también la devolución física de las cantidades recibidas en destino.')
+  if return_received:
+   target=self.scope(actor,doc['destino'],db,True)
+   if data.get('cicloDestino') is not None and data['cicloDestino']!=target['ciclo']:raise Conflict('El inventario destino fue restablecido. Crea una nueva solicitud.')
   returned=[];reason=text(data.get('motivo',''),2000);person=text(data.get('persona',''),200)
   if doc['estado']!='SOLICITADA':
    if data.get('confirmarDevolucion') is not True or not person:raise ValueError('Confirma el regreso físico del material pendiente en tránsito e indica quién lo recibe en origen.')
+   if return_received and not text(data.get('entregaDevolucion',''),200):raise ValueError('Indica quién entrega físicamente en destino.')
+   for payload, in db.execute("SELECT payload FROM inv_ledger WHERE warehouse=? AND source LIKE ?",(doc['origen'],'envio:'+doc['id']+':%')):
+    if json.loads(payload)['ciclo']!=origin['ciclo']:raise Conflict('La salida pertenece a un ciclo anterior. Registra un traspaso de devolución del ciclo actual.')
    for m in doc['partidas']:
     q=Decimal(m['cantidad'])-Decimal(m['recibido'])-Decimal(m.get('devuelto','0'))
+    received=Decimal(m['recibido'])-Decimal(m.get('devueltoRecibido','0')) if return_received else Decimal(0)
+    if received>0:
+     for payload, in db.execute("SELECT payload FROM inv_ledger WHERE warehouse=? AND sku=?",(doc['destino'],m['sku'])):
+      prior=json.loads(payload)
+      if prior.get('referencia')==doc['folio'] and prior.get('tipo')=='TRASPASO_ENTRADA' and prior['ciclo']!=target['ciclo']:raise Conflict('La recepción pertenece a un ciclo de inventario anterior. Registra un traspaso de devolución del ciclo actual.')
+     movement=self.post(db,doc['destino'],m,-received,Decimal(m['costo']),'cancelrec:'+doc['id']+':'+m['sku'],'TRASPASO_CANCELACION_SALIDA',actor,doc['folio'],reason,{'entrega':data.get('entregaDevolucion',''),'destino':doc['origen'],'concepto':'Cancelación de traspaso recibido: devolución al origen'},allow_negative=(data.get('inventarioNegativoAutorizado') is True or data.get('autorizarNegativo') is True))
+     self.post(db,doc['origen'],m,received,Decimal(movement['costoUnitario']),'cancelrecorigen:'+doc['id']+':'+m['sku'],'TRASPASO_CANCELACION_ENTRADA',actor,doc['folio'],reason,{'recibe':person,'origen':doc['destino'],'concepto':'Regreso físico por cancelación de traspaso recibido'})
+     m['devueltoRecibido']=fmt(Decimal(m.get('devueltoRecibido','0'))+received);returned.append({'sku':m['sku'],'cantidad':fmt(received),'procedencia':'DESTINO'})
     if q<=0:continue
     self.post(db,doc['origen'],m,q,Decimal(m['costo']),'canceltrasp:'+doc['id']+':'+m['sku'],'TRASPASO_CANCELACION',actor,doc['folio'],reason,{'recibe':person,'destino':doc['destino'],'concepto':'Cancelación de tránsito y devolución al origen'});m['devuelto']=fmt(Decimal(m.get('devuelto','0'))+q);returned.append({'sku':m['sku'],'cantidad':fmt(q)})
-   doc.setdefault('recepciones',[]).append({'fecha':now(),'actor':actor['email'],'recibe':person,'tipo':'cancelacion','partidas':returned})
-  doc.update({'estado':'CANCELADA_PARCIAL' if any(Decimal(m['recibido'])>0 for m in doc['partidas']) else 'CANCELADA','canceladoPor':actor['email'],'cancelado':now(),'cancelacion':{'motivo':reason,'autorizadoPor':actor['email'],'solicitadoPor':data.get('solicitadoPor',actor['email']),'devuelto':returned,'recibe':person}})
+   doc.setdefault('recepciones',[]).append({'fecha':now(),'actor':actor['email'],'recibe':person,'tipo':'cancelacion','entrega':data.get('entregaDevolucion',''),'partidas':returned})
+  doc.update({'estado':'CANCELADA_PARCIAL' if any(Decimal(m['recibido'])>Decimal(m.get('devueltoRecibido','0')) for m in doc['partidas']) else 'CANCELADA','canceladoPor':actor['email'],'cancelado':now(),'cancelacion':{'motivo':reason,'autorizadoPor':actor['email'],'solicitadoPor':data.get('solicitadoPor',actor['email']),'devuelto':returned,'recibe':person,'entrega':data.get('entregaDevolucion','')}})
 
  def receipt(self,db,doc,move,actor):
   w=str(doc['empresa'])+':'+doc['sucursal'];row=db.execute('SELECT active FROM inv_warehouses WHERE id=?',(w,)).fetchone()

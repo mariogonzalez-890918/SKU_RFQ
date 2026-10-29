@@ -5,6 +5,32 @@ import test_inventory as fixture
 import test_backup_import as masters
 
 class InventoryDocumentTests(fixture.InventoryTests):
+ def received_transfer(self,quantity='10',received='10'):
+  self.activate('20');self.activate('0',self.destination)
+  doc=self.inv('traspaso',{'accion':'solicitar','origen':self.w,'destino':self.destination,'partidas':[{'sku':self.sku,'cantidad':quantity}],'motivo':'Cancelación recibida','clave':uuid.uuid4().hex})['traspaso']
+  doc=self.inv('traspaso',{'accion':'enviar','id':doc['id'],'revision':doc['revision'],'persona':'Entrega','clave':uuid.uuid4().hex})['traspaso']
+  return self.inv('traspaso',{'accion':'recibir','id':doc['id'],'revision':doc['revision'],'persona':'Recibe','partidas':[{'sku':self.sku,'cantidad':received}],'clave':uuid.uuid4().hex})['traspaso']
+ def cancellation_data(self,doc):
+  return {'traspaso':doc['id'],'revision':doc['revision'],'confirmarDevolucion':True,'devolverRecibido':True,'persona':'Recibe origen','entregaDevolucion':'Entrega destino','clave':uuid.uuid4().hex}
+ def test_cancel_fully_received_preserves_receipt_and_reverses_both_warehouses_once(self):
+  doc=self.received_transfer();data=self.cancellation_data(doc)
+  self.assertEqual(self.call('/api/inventarios/traspaso/cancelar',{**data,'confirmarDevolucion':False})[0],400)
+  done=self.inv('traspaso/cancelar',data)['traspaso'];self.inv('traspaso/cancelar',data)
+  self.assertEqual(done['estado'],'CANCELADA');self.assertEqual(self.amount(),'20');self.assertEqual(self.amount(self.destination),'0');self.assertEqual(done['partidas'][0]['recibido'],'10');self.assertEqual(done['partidas'][0]['devueltoRecibido'],'10');self.assertEqual(done['recepciones'][0]['tipo'],'recibir');self.assertEqual(len(done['recepciones']),2)
+  self.assertEqual(self.inv('kardex?almacen='+self.w)['movimientos'][-1]['tipo'],'TRASPASO_CANCELACION_ENTRADA')
+  self.assertEqual(self.call('/api/inventarios/traspaso/cancelar',{**data,'revision':done['revision'],'clave':uuid.uuid4().hex})[0],409)
+ def test_partial_received_cancel_all_returns_transit_and_received_separately(self):
+  doc=self.received_transfer(received='4');done=self.inv('traspaso/cancelar',self.cancellation_data(doc))['traspaso'];self.assertEqual(done['estado'],'CANCELADA');self.assertEqual(self.amount(),'20');self.assertEqual(self.amount(self.destination),'0');self.assertEqual(done['partidas'][0]['devuelto'],'6');self.assertEqual(done['partidas'][0]['devueltoRecibido'],'4')
+ def test_received_cancel_negative_requires_explicit_authorization_and_scope(self):
+  doc=self.received_transfer();data=self.cancellation_data(doc);warehouse=self.stockuser('almacenista')
+  self.assertEqual(self.call('/api/inventarios/traspaso/cancelar',data,warehouse)[0],403)
+  self.inv('movimiento',{'almacen':self.destination,'tipo':'SALIDA','sku':self.sku,'cantidad':'8','motivo':'Consumo posterior','clave':uuid.uuid4().hex})
+  pending=self.inv('traspaso/cancelar',data)['solicitud'];self.assertEqual(pending['estado'],'PENDIENTE');self.assertEqual(self.amount(),'10');self.assertEqual(self.amount(self.destination),'2')
+  decision={'id':pending['id'],'aprobar':True,'comentario':'Validado'};self.assertEqual(self.call('/api/inventarios/operaciones/autorizar',decision)[0],400)
+  self.inv('operaciones/autorizar',{**decision,'autorizarNegativo':True});self.assertEqual(self.amount(),'20');self.assertEqual(self.amount(self.destination),'-8')
+ def test_received_cancel_rejects_destination_reset_without_partial_writes(self):
+  doc=self.received_transfer();review=self.inv('restablecer',{'almacen':self.destination,'revisar':True});self.inv('restablecer',{'almacen':self.destination,'huellaActual':review['huellaActual'],'confirmacion':'RESTABLECER','motivo':'Nuevo ciclo','clave':uuid.uuid4().hex});self.activate('10',self.destination)
+  self.assertEqual(self.call('/api/inventarios/traspaso/cancelar',self.cancellation_data(doc))[0],409);self.assertEqual(self.amount(),'10');self.assertEqual(self.amount(self.destination),'10')
  def pdf(self,path,actor=None):
   status,raw,_=self.call('/api/inventarios/'+path,actor=actor);self.assertEqual(status,200,raw[:200]);return ''.join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(raw)).pages)
  def test_partial_receipt_cancel_only_selected_line_then_remaining(self):

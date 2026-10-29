@@ -177,10 +177,23 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
    row=db.execute('SELECT payload FROM inv_transfers WHERE id=?',(data.get('traspaso'),)).fetchone()
    if not row:raise ValueError('Traspaso no encontrado.')
    doc=json.loads(row[0]);info=inv.scope(actor,doc['origen'],db,True)
-   if doc['revision']!=data.get('revision') or doc['estado'] not in ('SOLICITADA','EN_TRANSITO','PARCIAL'):raise Conflict('El traspaso cambió o está cerrado.')
+   if doc['revision']!=data.get('revision') or doc['estado'] not in ('SOLICITADA','EN_TRANSITO','PARCIAL','RECIBIDA','CERRADA_CON_DEVOLUCION'):raise Conflict('El traspaso cambió o ya fue cancelado.')
+   return_received=data.get('devolverRecibido') is True;target=None;deficits=[]
+   if doc['estado'] in ('RECIBIDA','CERRADA_CON_DEVOLUCION') and not return_received:raise ValueError('Confirma la devolución física de las cantidades recibidas en destino.')
+   if return_received:
+    target=inv.scope(actor,doc['destino'],db,True)
+    if not text(data.get('entregaDevolucion',''),200):raise ValueError('Indica quién entrega físicamente en destino.')
+    for m in doc['partidas']:
+     qty=Decimal(m['recibido'])-Decimal(m.get('devueltoRecibido','0'));balance=inv.balance(db,doc['destino'],m['sku']);available=Decimal(balance['cantidad']) if balance else Decimal(0)
+     if qty>available:deficits.append({'sku':m['sku'],'disponible':fmt(available),'salida':fmt(qty),'saldoPropuesto':fmt(available-qty)})
    if doc['estado']!='SOLICITADA' and (data.get('confirmarDevolucion') is not True or not text(data.get('persona',''),200)):raise ValueError('Confirma el regreso físico del tránsito e indica quién recibe en origen.')
    req={'id':uuid.uuid4().hex,'almacen':info['id'],'ciclo':info['ciclo'],'estado':'PENDIENTE','fecha':now(),'solicitadoPor':actor['email'],'motivo':text(data.get('motivo',''),2000),'tipo':'CANCELAR_TRASPASO','traspaso':doc['id'],'revisionTraspaso':doc['revision'],'folio':doc['folio'],'persona':text(data.get('persona',''),200),'confirmarDevolucion':data.get('confirmarDevolucion') is True,'partidas':[{**{k:m[k] for k in ('sku','nombre','unidad')},'cantidad':m['cantidad'] if doc['estado']=='SOLICITADA' else fmt(Decimal(m['cantidad'])-Decimal(m['recibido'])-Decimal(m.get('devuelto','0'))),'cantidadEntrega':'','unidadEntrega':''} for m in doc['partidas']]};result=None
-   if actor['role'] in APPROVERS:result=self.apply_transfer_cancel(db,req,actor);req.update({'estado':'APROBADA','autorizadoPor':actor['email'],'resuelto':now(),'comentario':req['motivo']})
+   req.update({'devolverRecibido':return_received,'entregaDevolucion':text(data.get('entregaDevolucion',''),200),'cicloDestino':target['ciclo'] if target else None})
+   for line,m in zip(req['partidas'],doc['partidas']):
+    if return_received:line['cantidad']=fmt(Decimal(line['cantidad'])+Decimal(m['recibido'])-Decimal(m.get('devueltoRecibido','0')))
+   if deficits:req.update({'inventarioInsuficiente':deficits,'almacenSalida':doc['destino']})
+   if actor['role'] in APPROVERS and data.get('autorizarNegativo') is True:req['inventarioNegativoAutorizado']=True
+   if actor['role'] in APPROVERS and (not deficits or req.get('inventarioNegativoAutorizado')):result=self.apply_transfer_cancel(db,req,actor);req.update({'estado':'APROBADA','autorizadoPor':actor['email'],'resuelto':now(),'comentario':req['motivo']})
    db.execute('INSERT INTO inv_operations VALUES(?,?,?,?)',(req['id'],info['id'],req['estado'],dumps(req)));return inv.remember(db,data,{'ok':True,'solicitud':req,**(result or {})})
  def apply_transfer_cancel(self,db,req,actor):
   inv=self.inv;row=db.execute('SELECT payload FROM inv_transfers WHERE id=?',(req['traspaso'],)).fetchone();doc=json.loads(row[0]) if row else None

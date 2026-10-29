@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.7
+# GMP ERP · Versión 3.1.8
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -7,6 +7,13 @@ Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos s
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
+## Cambios 3.1.8
+
+- Botón rojo **Cancelar traspaso** en Traspasos y Recepciones entre almacenes, accesible desde ambos lados con permiso del origen.
+- Cancelación de solicitudes, tránsito, recepciones parciales y completas. El regreso físico de material recibido genera salida del destino y entrada al origen, sin borrar las recepciones originales; en parciales se puede devolver solo el tránsito o todo.
+- Almacenista solicita; Gerencia, AUXTI y Superadministrador autorizan. Se validan permisos de ambos almacenes al devolver material recibido, revisiones y ciclos; cualquier saldo negativo requiere autorización explícita.
+- El Kárdex incluye los conceptos de devolución por cancelación, con costos reservados a los tres perfiles autorizados.
 
 ## Cambios 3.1.7
 
