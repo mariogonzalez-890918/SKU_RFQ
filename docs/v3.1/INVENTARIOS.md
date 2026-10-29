@@ -1,4 +1,4 @@
-# GMP ERP 3.1.2 · Almacenes
+# GMP ERP 3.1.3 · Almacenes
 
 Se crea un almacén por razón social y sucursal vinculada: EJIDOS, SAN PABLO, CUAUTITLAN y EJE 8. La razón social se administra en la configuración comercial. Sistemas y AUXTI asignan empresas y sucursales en Compras → Accesos; Inventarios respeta esa misma asignación y los almacenes autorizados del usuario. El módulo se habilita inicialmente para Compras, Gerencia, Almacenista, AUXTI y Superadministrador; Sistemas puede cambiar los accesos por perfil. Requisición nunca recibe acceso a costos.
 
@@ -9,12 +9,12 @@ Se crea un almacén por razón social y sucursal vinculada: EJIDOS, SAN PABLO, C
 3. Captura el conteo. Una celda vacía se omite, un cero explícito significa cero físico. Se validan SKU únicos, descripción y unidad del maestro. Para incrementar existencias se exige costo de entrega válido del maestro; no se inventan costos faltantes.
 4. Revisa la vista previa y envía la solicitud. Gerencia, Superadministrador o AUXTI autorizan o rechazan. Almacenista solicita; no autoriza ajustes. Los conteos quedan invalidados si otro movimiento alteró el almacén desde su revisión.
 
-Las nuevas recepciones y surtidos contabilizan existencias aunque el conteo inicial esté pendiente; el saldo se identifica como provisional. Un surtido que exceda el saldo requiere autorización expresa del negativo. Si existen varias razones sociales en una sucursal, selecciona el almacén al surtir. Las entregas históricas faltantes se concilian una sola vez desde Movimiento de almacén; verifica que el conteo no las haya descontado ya. El inventario inicial fija el físico contado y conserva los movimientos anteriores.
+Las nuevas recepciones y surtidos contabilizan existencias aunque el conteo inicial esté pendiente; el saldo se identifica como provisional. Por indicación operativa, los nuevos surtidos se registran directamente aunque excedan el saldo; se conserva una alerta y el saldo negativo. Las correcciones, cancelaciones y movimientos manuales conservan las autorizaciones. Si existen varias razones sociales en una sucursal, selecciona el almacén al surtir. Las entregas históricas faltantes se concilian una sola vez desde Movimiento de almacén; verifica que el conteo no las haya descontado ya. El inventario inicial fija el físico contado y conserva los movimientos anteriores.
 
 ## Operación
 
 - Recepción de compra: aumenta existencias con su equivalencia UM_ENTREGA, usando el precio antes de impuestos del pedido. Se registra en la misma transacción SQLite que la recepción.
-- Surtido real: descuenta únicamente cantidadSurtida, conserva lo solicitado y solicita aprobación expresa de existencias negativas. Correcciones/cancelaciones autorizadas revierten la diferencia cuando el surtido pertenece al mismo ciclo del almacén. Un cambio antiguo no modifica un ciclo posterior a un restablecimiento.
+- Surtido real: descuenta únicamente cantidadSurtida, conserva lo solicitado y permite saldo negativo directo con alerta. Correcciones/cancelaciones autorizadas revierten la diferencia cuando el surtido pertenece al mismo ciclo del almacén. Un cambio antiguo no modifica un ciclo posterior a un restablecimiento.
 - Entradas/salidas extraordinarias: Gerencia, AUXTI o Superadministrador, con motivo. Almacén solicita el ajuste mediante conteo físico.
 - Traspaso: solicitud → salida → tránsito → recepción parcial/total. El envío descuenta origen; el destino aumenta solo con cantidades confirmadas a su llegada. Se conserva quién entrega, quién recibe, usuarios, fechas, costos transportados y saldos pendientes. Un usuario de origen puede solicitar salida a otro destino configurado; solo una cuenta asignada al destino puede confirmar su llegada. Devolver tránsito al origen requiere uno de los tres autorizadores.
 - Costeo: promedio ponderado en unidad de entrega, sin impuestos. El costo del material transportado se congela al enviarse. Es control operativo, sin pólizas fiscales ni CFDI intercompañía.
@@ -55,3 +55,7 @@ Se consultaron como referencia las operaciones de [ubicaciones y tránsito de Od
 ### Reportes de compras 3.1.2
 
 Filtros propios por sucursal, proveedor, estado y fechas de pedido o entrega. Cantidades pedidas, recibidas, pendientes y compradas por partida; importes y agrupación por sucursal/proveedor. Excel con cinco hojas: Pedidos, Partidas, Movimientos, Por sucursal y Por proveedor. PDF detallado por pedido. Borradores, cotizaciones enviadas y cancelaciones no se suman al total confirmado.
+
+### Exportación Kárdex 3.1.3
+
+Imprimir Kárdex abre una vista de impresión con resumen y detalle; permite elegir impresora o Guardar PDF desde el navegador. Descargar Kárdex PDF incluye ambos apartados. Descargar Kárdex XML contiene filtros, resumen por material y movimientos. Todos respetan el alcance de almacenes y la visibilidad de costos del perfil. Las fechas se presentan dd/mm/yyyy; SKU conserva ceros iniciales.

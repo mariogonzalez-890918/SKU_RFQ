@@ -108,7 +108,8 @@ class WorkflowStore:
    c['requiereSistemas']=actor['role']=='auxti' and removed
    shortages=self.inventory.fulfillment_preview(db,old,c,actor) if hasattr(self,'inventory') else []
    if shortages:c.update({'inventarioInsuficiente':shortages,'alertaInventario':'Pedido con menos inventario: requiere aprobación para registrar saldo negativo.'})
-   if not shortages and (c['tipo']=='surtir' or actor['role'] in EDITORS or actor['role']=='auxti' and not removed):result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido aprobado y registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
+   if shortages and c['tipo']=='surtir':c.update({'inventarioNegativoAutorizado':True,'inventarioNegativoDirecto':True,'alertaInventario':'Surtido registrado con menos inventario: se generó saldo negativo en el Kárdex.'})
+   if c['tipo']=='surtir' or not shortages and (actor['role'] in EDITORS or actor['role']=='auxti' and not removed):result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido directo registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
    if c['tipo']=='surtir' and result:
     for pending_id,payload in db.execute("SELECT id,payload FROM req_changes WHERE status='PENDIENTE' AND json_extract(payload,'$.objetivo')=? AND json_extract(payload,'$.tipo')='aprobar'",(c['objetivo'],)).fetchall():
      pending=json.loads(payload)

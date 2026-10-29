@@ -4,6 +4,37 @@ from comercial_print import report_xlsx,report_pdf
 from fechas import display_date
 from inventarios_operaciones import InventoryOperations
 
+def kardex_export(result,filters,action,costs):
+ import html,io,xml.etree.ElementTree as ET
+ if action=='kardex/xml':
+  root=ET.Element('Kardex',{'aplicacion':'GMP ERP','version':'1'});f=ET.SubElement(root,'Filtros')
+  for key in ('almacen','desde','hasta','sku','direccion','tipo'):ET.SubElement(f,key).text=display_date(filters.get(key,'')) if key in ('desde','hasta') else filters.get(key,'')
+  for section,row_name,key in (('Resumen','Material','resumenPorSku'),('Movimientos','Movimiento','movimientos')):
+   group=ET.SubElement(root,section)
+   for row in result[key]:
+    node=ET.SubElement(group,row_name)
+    for name,value in row.items():ET.SubElement(node,name).text='' if value is None else display_date(value) if name=='fecha' else str(value)
+  ET.indent(root);return ET.tostring(root,encoding='utf-8',xml_declaration=True),'application/xml; charset=utf-8'
+ summary=[['Almacén / Razón social','SKU / Material','Unidad','Inicial','Entradas','Salidas','Al corte','Actual']+(['Costo actual','Valor actual'] if costs else [])]
+ for r in result['resumenPorSku']:summary.append([r['sucursal']+' / '+r['razonSocial'],r['sku']+' / '+r['nombre'],r['unidad'],r['saldoInicial'],r['entradas'],r['salidas'],r['saldoFinal'],r['existenciaActual']]+([r['costoUnitarioActual'],r['valorExistenciaActual']] if costs else []))
+ detail=[['Fecha / Concepto','Almacén / Material','Unidad','Inicial','Entrada','Salida','Saldo anterior','Saldo','Referencia / Entrega / Recibe']+(['Costo / Importe'] if costs else [])]
+ for r in result['movimientos']:detail.append([display_date(r['fecha'])+' / '+r.get('concepto',r['tipo']),r['sucursal']+' / '+r['razonSocial']+' / '+r['sku']+' / '+r['nombre'],r['unidad'],r['inicial'],r['entrada'],r['salida'],r['antes'],r['saldo'],r['referencia']+' / '+r.get('entrega','')+' / '+r.get('recibe','')+' / '+r['actor']]+([r['costoUnitario']+' / '+r['importe']] if costs else []))
+ subtitle='Almacén: '+filters.get('almacen','')+' · Desde: '+display_date(filters.get('desde',''))+' · Hasta: '+display_date(filters.get('hasta',''))+' · SKU: '+filters.get('sku','')+' · Dirección: '+filters.get('direccion','Todas')+' · Tipo: '+filters.get('tipo','Todos')
+ note='El resumen incluye todas las entradas y salidas del periodo. Dirección y tipo filtran el detalle. El saldo anterior al conteo inicial es provisional.'
+ def esc(v):return html.escape('Pendiente' if v is None else str(v))
+ if action=='kardex/imprimir':
+  def table(rows):return '<table><thead><tr>'+''.join('<th>'+esc(v)+'</th>' for v in rows[0])+'</tr></thead><tbody>'+''.join('<tr>'+''.join('<td>'+esc(v)+'</td>' for v in row)+'</tr>' for row in rows[1:])+'</tbody></table>'
+  page='<!doctype html><html lang="es"><meta charset="utf-8"><title>Kárdex de materiales</title><style>body{font:12px Arial;color:#222}table{border-collapse:collapse;width:100%;margin-bottom:24px;table-layout:fixed}th,td{border:1px solid #ccc;padding:6px;vertical-align:top;overflow-wrap:anywhere}th{background:#eee}thead{display:table-header-group}tr{break-inside:avoid}@page{size:A4 landscape;margin:12mm}@media print{button{display:none}}button{padding:10px}</style><button onclick="window.print()">Imprimir / Guardar PDF</button><h1>GMP ERP · Kárdex de materiales</h1><p>'+esc(subtitle)+'</p><p>'+esc(note)+'</p><h2>Inicial, entradas, salidas y existencias</h2>'+table(summary)+'<h2>Detalle de movimientos</h2>'+table(detail)+'</html>'
+  return page.encode('utf8'),'text/html; charset=utf-8'
+ from reportlab.lib import colors
+ from reportlab.lib.pagesizes import A4,landscape
+ from reportlab.lib.styles import ParagraphStyle
+ from reportlab.platypus import SimpleDocTemplate,LongTable,TableStyle,Paragraph,Spacer
+ out=io.BytesIO();page=landscape(A4);style=ParagraphStyle('kardex',fontName='Helvetica',fontSize=7,leading=9);heading=ParagraphStyle('heading',parent=style,fontSize=15,leading=19,spaceAfter=8);story=[Paragraph('GMP ERP · Kárdex de materiales',heading),Paragraph(esc(subtitle),style),Paragraph(esc(note),style),Spacer(1,12)]
+ for title,rows in (('Inicial, entradas, salidas y existencias',summary),('Detalle de movimientos',detail)):
+  story.append(Paragraph(title,heading));t=LongTable([[Paragraph(esc(v),style) for v in row] for row in rows],repeatRows=1,colWidths=[(page[0]-40)/len(rows[0])]*len(rows[0]));t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#eae1e7')),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6)]));story.extend([t,Spacer(1,14)])
+ SimpleDocTemplate(out,pagesize=page,leftMargin=20,rightMargin=20,topMargin=24,bottomMargin=24).build(story);return out.getvalue(),'application/pdf'
+
 class InventoryAPI:
  def __init__(self,store,po):self.inv=InventoryStore(store,po);self.ops=InventoryOperations(self.inv)
  def get(self,path,query,actor):
@@ -23,6 +54,9 @@ class InventoryAPI:
   if action=='pedidos-recibir':return inv.pending_receipts(w,actor)
   if action=='recepciones':return inv.receipts(w,q,actor)
   if action=='disponibilidad':return inv.availability(w,q.get('sku'),actor)
+  if action in ('kardex/xml','kardex/pdf','kardex/imprimir'):
+   result=inv.public(inv.kardex(w,q,actor,True),actor)
+   return kardex_export(result,q,action,actor['role'] in APPROVERS)
   if action=='layout':
    inv.scope(actor,w)
    return report_xlsx([HEADERS,*[[m['sku'],m['nombre'],m['unidad'],''] for m in inv.materials().values()]],'INVENTARIO_INICIAL'),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
