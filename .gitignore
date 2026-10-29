@@ -110,3 +110,10 @@
 !/docs/v3.0/
 /docs/v3.0/*
 !/docs/v3.0/*.md
+
+!/tests/test_inventory.py
+!/sku-servidor/public/inventory.html
+!/sku-servidor/public/inventory.js
+!/docs/v3.1/
+/docs/v3.1/*
+!/docs/v3.1/*.md

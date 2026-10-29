@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.0.0
+# GMP ERP · Versión 3.1.0
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -105,3 +105,5 @@ Esta prueba utiliza datos vacíos y credenciales aleatorias temporales. Las guí
 Requisición y Almacenista solicitan aprobación o cancelación desde el detalle. Superadministrador, AUXTI y Gerente autorizan; se conserva el folio y el historial. Almacenista y los perfiles administrativos aprueban capturando cantidades realmente surtidas en UM_ENTREGA y la marca SURTIDO. Solicitado y surtido se muestran por separado, también en ambas impresiones, sin mostrar costos al perfil Requisición. El costeo usa lo realmente surtido y compara su total contra lo requisitado; las canceladas siguen excluidas.
 
 Versión 1.8.0: Almacenista, Superadministrador, Gerencia y AUXTI aprueban capturando las cantidades realmente surtidas y el estado SURTIDO. El almacenista solicita correcciones de surtidos con autorización; los administradores y gerencia las aplican directamente. Reportes y descargas comparan total requisitado y total surtido; el costeo usa el surtido real y las cantidades se agrupan por unidad, sin sumar unidades incompatibles. Sin captura de entrega, el surtido es cero.
+
+Inventarios 3.1: carga inicial, ajustes autorizados, surtido real, recepciones y traspasos con confirmación. Consulta [puesta en marcha de almacenes](docs/v3.1/INVENTARIOS.md).

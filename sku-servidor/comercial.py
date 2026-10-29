@@ -396,7 +396,7 @@ class CommercialStore:
    if channel=='expendios' and (line.get('precioVisto') is not None and amount(line['precioVisto'])!=amount(unit_price) or line.get('ivaVisto') is not None and amount(line['ivaVisto'])!=amount(product['iva'])):raise Conflict('Cambió el precio o IVA de '+sku+'. Actualiza los productos y revisa el total antes de cobrar.')
    value=tax_line(line.get('cantidad'),unit_price,product['iva'],line.get('descuento','0') if channel=='ventasins' and actor['role']!='ventaspasteleria' else '0')
    result.append({'sku':sku,'nombre':product['nombre'],'unidad':product['unidad'],'nota':text(line.get('nota',''),500),'revisionProducto':row[1],'revisionPrecio':price[1],**value})
-  return {'empresa':company,'emisor':issuer,'sucursal':branch,'cliente':customer,'lista':listing,'partidas':result,'condiciones':text(data.get('condiciones',''),2000),'base':money(sum(D(r['base']) for r in result)),'impuesto':money(sum(D(r['impuesto']) for r in result)),'total':money(sum(D(r['total']) for r in result))}
+  return {'empresa':company,'emisor':issuer,'sucursal':branch,'cliente':customer,'lista':listing,'partidas':result,'observaciones':text(data.get('observaciones',''),10000),'condiciones':text(data.get('condiciones',''),2000),'base':money(sum(D(r['base']) for r in result)),'impuesto':money(sum(D(r['impuesto']) for r in result)),'total':money(sum(D(r['total']) for r in result))}
  def document(self,db,id,actor,channel):
   self.module(actor,channel);row=db.execute('SELECT company,channel,creator,box,revision,payload FROM cm_documents WHERE id=?',(id,)).fetchone()
   if not row or row[1]!=channel:raise ValueError('Documento no encontrado.')

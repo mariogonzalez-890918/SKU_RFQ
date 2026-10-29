@@ -16,6 +16,7 @@ from imagenes import ImageStore
 from aprobaciones_admin import AdminApprovals
 from comercial_routes import CommercialAPI
 from pedidos_compra_routes import PurchaseAPI
+from inventarios_routes import InventoryAPI
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
@@ -219,7 +220,10 @@ def create_handler(store):
  requisitions=RequisitionStore(store)
  reports=ReportStore(store,requisitions)
  procurement=PurchaseAPI(store,commercial.cm,requisitions,reports)
+ inventory=InventoryAPI(store,procurement.po)
+ procurement.po.inventory=inventory.inv
  workflow=WorkflowStore(store,requisitions,reports)
+ workflow.inventory=inventory.inv
  purchases=PurchaseImporter(store,sku,validate,protect)
  images=ImageStore(store,requisitions)
  backups=BackupStore(store,validate,reports)
@@ -248,6 +252,16 @@ def create_handler(store):
     if not any(m in enabled_modules(actor) for m in ('ventasins','expendios')):return self.reply(403,{'error':'Módulo comercial no habilitado.'})
     file,kind={'/comercial':('commercial.html','text/html'),'/commercial.js':('commercial.js','text/javascript'),'/commercial.css':('commercial.css','text/css')}[path]
     return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
+   if path in ('/inventarios','/inventory.js'):
+    try:
+     require_module(actor,'inventarios');name,kind=('inventory.html','text/html') if path=='/inventarios' else ('inventory.js','text/javascript');return self.reply(200,(ROOT/'public'/name).read_bytes(),kind+'; charset=utf-8')
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+   if path.startswith('/api/inventarios/'):
+    try:
+     result=inventory.get(path,parse_qs(urlsplit(self.path).query),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except RequisitionConflict as e:return self.reply(409,{'error':str(e)})
+    except (ValueError,KeyError,TypeError,ArithmeticError) as e:return self.reply(400,{'error':str(e)})
    if path in ('/compras','/purchase.js','/purchase.css'):
     try:
      require_module(actor,'pedidoscompra');file,kind={'/compras':('purchase.html','text/html'),'/purchase.js':('purchase.js','text/javascript'),'/purchase.css':('purchase.css','text/css')}[path];return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
@@ -375,6 +389,8 @@ def create_handler(store):
     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),actor['csrf']):return self.reply(403,{'error':'Solicitud sin verificación de sesión.'})
     if self.path=='/api/logout' and self.command=='POST':
      store.logout(self.token);return self.reply(200,{'ok':True},cookie='gmp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+    if self.path.startswith('/api/inventarios/') and self.command=='POST':
+     result=inventory.mutate(self.path,self.read_body(),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
     if self.path.startswith('/api/pedidoscompra/') and self.command=='POST':
      result=procurement.mutate(self.path,self.read_body(),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
     if self.path.startswith('/api/comercial/') and self.command=='POST':
@@ -437,6 +453,7 @@ def create_handler(store):
    except Exception:self.reply(500,{'error':'No se pudo guardar. Revisa el registro del servidor.'})
   def log_message(self,fmt,*args):print(self.address_string(),fmt%args,flush=True)
  Handler.commercial=commercial
+ Handler.inventory=inventory
  Handler.procurement=procurement
  return Handler
 def main():

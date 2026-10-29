@@ -11,3 +11,5 @@
 #templateLines small{display:block;color:#747780;margin-top:4px;font-weight:400}
 
 #lines input,#lines select{min-width:100px;max-width:180px}#lines td:first-child{min-width:200px}small{display:block;color:#747780;margin-top:4px}.form-grid>.wide{grid-column:1/-1}.context p{flex-basis:100%;margin:0}textarea{resize:vertical;max-width:100%;width:100%}#restoreControls{margin-top:20px;display:flex;gap:12px;flex-wrap:wrap}.top #branch{max-width:180px}@media(max-width:1024px){.top{height:auto;min-height:62px;flex-wrap:wrap}.top #user{display:none}.top label{margin-left:0}aside{top:110px}main{padding:14px}.top select{max-width:150px}}
+
+button:disabled{cursor:not-allowed}body[data-busy="true"] button:not(:disabled){cursor:progress}#capturePermission{margin:0 0 16px;color:#5e6269}#purchaseBusy{padding:8px 12px;background:#e4f3ec}

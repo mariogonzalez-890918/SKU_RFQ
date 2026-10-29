@@ -14,7 +14,7 @@ class PurchaseV3Tests(fixtures.ModuleBackupTests):
  def confirm(self,doc):return self.po('accion',{'id':doc['id'],'revision':doc['revision'],'accion':'confirmar'},self.buyer)['documento']
  def move(self,doc,qty,kind='recepcion',**fields):return self.po(kind,{'id':doc['id'],'revision':doc['revision'],'clave':uuid.uuid4().hex,'partidas':[{'linea':'1','cantidad':qty}],**fields},self.buyer)
  def test_roles_company_scope_and_four_series_editors(self):
-  self.assertIn('pedidoscompra',self.value('/api/me')['user']['modulos']);self.assertEqual(self.call('/api/pedidoscompra/pedidos',{'empresa':self.company,'sucursal':'EJIDOS','proveedor':self.vendor,'clave':uuid.uuid4().hex,'partidas':[]})[0],403)
+  self.assertIn('pedidoscompra',self.value('/api/me')['user']['modulos']);self.assertTrue(self.po('meta')['puedeCapturar']);created=self.po('pedidos',{'proveedor':self.vendor,'clave':uuid.uuid4().hex,'partidas':[{'materialId':self.material['materialId'],'cantidad':'1','tipoUnidad':'COMPRA','precio':'100','impuesto':'0'}]});self.assertEqual(created['documento']['creador'],'sistemas@grupomipan.com')
   other=self.value('/api/comercial/empresas',{'nombre':'OTRA','sucursales':['EJIDOS']})['id'];self.assertEqual(self.call('/api/pedidoscompra/proveedores?empresa='+str(other),actor=self.buyer)[0],403)
   for role in ('gerente','auxti'):
    email=role+'@example.test';self.value('/api/users',{'email':email,'name':role,'role':role,'password':self.password,'active':True,'sucursales':list(fixtures.requisiciones.BRANCHES) if role=='gerente' else ['EJIDOS']});self.po('accesos',{'email':email,'revision':0,'empresas':[self.company],'sucursales':['EJIDOS']});actor=self.login(email);s=self.po('series',actor=actor)['series'][0];self.po('series',{'tipo':s['tipo'],'revision':s['revision'],'serie':s['serie'],'siguiente':s['siguiente']+1},actor)
@@ -49,6 +49,13 @@ class PurchaseV3Tests(fixtures.ModuleBackupTests):
   from plantillas_import import VENDOR_HEADERS
   code=next(v['codigo'] for v in self.po('proveedores')['proveedores'] if v['id']==self.vendor);row=[code,'SEMANAL',self.material['sku'],str(self.material['materialId']),'2','COMPRA','100','8','Nota','Observaciones','Condiciones'];content=';'.join(VENDOR_HEADERS)+'\n'+';'.join(row);data={'contenido':base64.b64encode(content.encode()).decode()};review=self.po('plantillas/importar',{**data,'revisar':True});self.assertEqual(review['nuevas'],1);self.assertEqual(self.po('plantillas')['plantillas'],[]);self.po('plantillas/importar',{**data,'huellaActual':review['huellaActual']});tpl=self.po('plantillas')['plantillas'][0];self.assertEqual(tpl['partidas'][0]['tipoUnidad'],'COMPRA');self.assertEqual(len(self.po('plantillas',actor=self.buyer)['plantillas']),1);self.assertEqual(self.call('/api/pedidoscompra/plantillas',{'empresa':self.company,'nombre':'NO','proveedor':self.vendor,'partidas':[{'materialId':self.material['materialId'],'cantidad':'1'}]},self.buyer)[0],403)
   status,raw,_=self.call('/api/pedidoscompra/plantillas/layout');self.assertEqual(status,200);self.assertTrue(raw.startswith(b'PK'))
+
+ def test_request_detail_includes_lines_and_blocks_wrong_branch(self):
+  req=self.create_req('20');detail=self.po('requisicion',extra='&id='+req['id']);self.assertEqual(detail['requisicion']['numero'],req['numero']);self.assertEqual(detail['requisicion']['partidas'][0]['cantidad'],'20');self.assertEqual(self.call('/api/pedidoscompra/requisicion?empresa='+str(self.company)+'&sucursal=SAN%20PABLO&id='+req['id'])[0],403)
+ def test_aux_and_warehouse_can_capture_but_warehouse_cannot_edit_series(self):
+  for role in ('auxti','almacenista'):
+   who=role+'@example.test';self.value('/api/users',{'email':who,'name':role,'role':role,'password':self.password,'active':True,'almacenes':['EJIDOS']});self.po('accesos',{'email':who,'revision':0,'empresas':[self.company],'sucursales':['EJIDOS']});actor=self.login(who);self.assertTrue(self.po('meta',actor=actor)['puedeCapturar']);created=self.po('pedidos',{'proveedor':self.vendor,'clave':uuid.uuid4().hex,'partidas':[{'materialId':self.material['materialId'],'cantidad':'1','tipoUnidad':'ENTREGA','precio':'10','impuesto':'8'}]},actor);self.assertEqual(created['documento']['creador'],who)
+   if role=='almacenista':self.assertFalse(self.po('meta',actor=actor)['puedeSeries'])
 
 for name in fixtures.ModuleBackupTests.__dict__:
  if name.startswith('test_') and name not in PurchaseV3Tests.__dict__:setattr(PurchaseV3Tests,name,None)

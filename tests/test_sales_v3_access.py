@@ -18,5 +18,12 @@ class SalesV3Access(fixture.CommercialTests):
   self.load_master();text=';'.join(CLIENT_HEADERS)+'\n;PLANTILLA GENERAL;'+fixture.SKU+';5;Nota;Condiciones';data={'empresa':self.company,'contenido':base64.b64encode(text.encode()).decode()};review=self.cm('plantillas/importar',{**data,'revisar':True});self.assertEqual(review['nuevas'],1);self.assertEqual(self.cm('plantillas')['plantillas'],[]);self.cm('plantillas/importar',{**data,'huellaActual':review['huellaActual']});self.assertEqual(self.cm('plantillas')['plantillas'][0]['partidas'][0]['cantidad'],'5');self.assertEqual(self.cm('plantillas/importar',{**data,'revisar':True})['omitidas'],1)
   duplicate={'empresa':self.company,'contenido':base64.b64encode((text+'\n'+text.split('\n')[1]).encode()).decode(),'revisar':True};self.assertEqual(self.call('/api/comercial/plantillas/importar',duplicate)[0],400)
 
+ def test_observations_conditions_and_line_notes_are_exported(self):
+  import io,zipfile
+  self.load_master();doc=self.order(observaciones='OBSERVACION DEL PEDIDO',condiciones='CONDICIONES QA',partidas=[{'sku':fixture.SKU,'cantidad':'1','nota':'OBSERVACION DE PARTIDA'}]);status,raw,_=self.call('/api/comercial/documento/excel?canal=ventasins&id='+doc['id']);self.assertEqual(status,200)
+  with zipfile.ZipFile(io.BytesIO(raw)) as z:
+   sheet=z.read('xl/worksheets/sheet1.xml').decode();self.assertIn('OBSERVACION DEL PEDIDO',sheet);self.assertIn('OBSERVACION DE PARTIDA',sheet);self.assertIn('CONDICIONES QA',sheet)
+  printed=self.call('/api/comercial/imprimir?canal=ventasins&id='+doc['id'])[1].decode();self.assertIn('OBSERVACION DEL PEDIDO',printed);self.assertIn('OBSERVACION DE PARTIDA',printed)
+
 for name in dir(fixture.CommercialTests):
  if name.startswith('test_') and name not in SalesV3Access.__dict__:setattr(SalesV3Access,name,None)

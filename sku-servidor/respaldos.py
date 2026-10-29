@@ -129,7 +129,8 @@ class BackupStore:
    if c['tipo']=='modificar':
     values=c.get('datos');check(isinstance(values,dict) and set(values)=={'area','solicitante','observaciones','partidas'},'Campos de corrección inválidos.');document({**docs[c['objetivo']],**values})
    if c['tipo'] in ('surtir','corregir_surtido'):
-    values=c.get('datos');check(isinstance(values,dict) and not set(values)-{'partidas','area','solicitante','observaciones'} and isinstance(values.get('partidas'),list),'Datos de surtido inválidos.')
+    values=c.get('datos');check(isinstance(values,dict) and not set(values)-{'partidas','area','solicitante','observaciones','almacenInventario'} and isinstance(values.get('partidas'),list),'Datos de surtido inválidos.')
+    if values.get('almacenInventario') is not None:check(isinstance(values['almacenInventario'],str) and len(values['almacenInventario'])<100,'Almacén de surtido inválido.')
     base=docs[c['objetivo']];parts={p['materialId']:p for p in base['partidas']};seen=set()
     for line in values['partidas']:
      check(isinstance(line,dict) and set(line)=={'materialId','cantidadSurtida'} and type(line['materialId']) is int and line['materialId'] in parts and line['materialId'] not in seen,'Partidas de surtido inválidas.');seen.add(line['materialId']);check(0<=dec(line['cantidadSurtida'])<=dec(parts[line['materialId']]['cantidad']),'Cantidad surtida inválida.')
@@ -153,6 +154,7 @@ class BackupStore:
    db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);current_hash=digest(current);self.validate(db,module,incoming)
    result={'modulo':module,'nombre':MODULES[module],'actual':self.summary(module,current),'respaldo':self.summary(module,incoming),'huellaActual':current_hash,'legado':legacy,'nota':'Se reemplaza únicamente el módulo elegido. Se conservan los máximos de folios e identificadores para evitar reutilizarlos.'}
    if not apply:return result
+   if module in ('requisiciones','comercial') and db.execute("SELECT 1 FROM sqlite_master WHERE name='inv_ledger'").fetchone() and db.execute('SELECT 1 FROM inv_ledger LIMIT 1').fetchone():raise Conflict('Existen movimientos de inventario integrados. Conserva el historial y recupera una copia completa de data para no desajustar las existencias.')
    check(data.get('confirmar') is True,'Confirma que deseas reemplazar los datos del módulo seleccionado.')
    if data.get('huellaActual')!=current_hash:raise Conflict('El módulo cambió después de la revisión. Revisa el respaldo otra vez antes de restaurar.')
    backup_id=uuid.uuid4().hex;directory=self.store.directory/'respaldos';directory.mkdir(exist_ok=True);previous=self.envelope(module,current,actor);target=directory/('antes-'+backup_id+'.json');target.write_text(json.dumps(previous,ensure_ascii=False),encoding='utf8')
@@ -190,6 +192,7 @@ class BackupStore:
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);fingerprint=digest(current);result={'modulo':module,'nombre':MODULES[module],'actual':self.summary(module,current),'huellaActual':fingerprint,'nota':'Se vacían los datos del módulo elegido. Usuarios, otros módulos y máximos de consecutivos/folios se conservan. Se crea una copia automática antes de vaciar.'}
    if not apply:return result
+   if module in ('requisiciones','comercial') and db.execute("SELECT 1 FROM sqlite_master WHERE name='inv_ledger'").fetchone() and db.execute('SELECT 1 FROM inv_ledger LIMIT 1').fetchone():raise Conflict('Existen movimientos de inventario integrados. Conserva el historial y recupera una copia completa de data para no desajustar las existencias.')
    check(data.get('confirmar') is True and data.get('texto')=='VACIAR','Escribe VACIAR para confirmar el reinicio del módulo.')
    if data.get('huellaActual')!=fingerprint:raise Conflict('El módulo cambió; vuelve a revisar antes de vaciar.')
    id=uuid.uuid4().hex;folder=self.store.directory/'respaldos';folder.mkdir(exist_ok=True);(folder/('antes-'+id+'.json')).write_text(json.dumps(self.envelope(module,current,actor),ensure_ascii=False),encoding='utf8')

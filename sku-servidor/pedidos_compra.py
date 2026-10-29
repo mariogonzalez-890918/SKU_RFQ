@@ -8,8 +8,8 @@ from requisiciones import BRANCHES,Conflict,now,text,parse_master
 from reportes import infer_factor,dec,unit,dimension
 from productos_comerciales import optional_price
 
-CAPTURERS={'compras','gerente'}
-SERIES_EDITORS=CAPTURERS|ADMINS
+CAPTURERS={'compras','gerente','superadmin','auxti','almacenista'}
+SERIES_EDITORS={'compras','gerente'}|ADMINS
 RECEIVERS=SERIES_EDITORS|{'almacenista'}
 STATES=('BORRADOR','ENVIADO','PEDIDO','RECEPCION_PARCIAL','RECIBIDO','COMPRADO','CANCELADO')
 TABLES=('po_vendors','po_templates','po_sequences','po_series_registry','po_numbers','po_orders','po_moves','po_access','po_audit','po_mail')
@@ -56,6 +56,10 @@ class PurchaseStore:
    CREATE TABLE IF NOT EXISTS po_mail(id TEXT PRIMARY KEY,order_id TEXT NOT NULL,client_key TEXT NOT NULL UNIQUE,state TEXT NOT NULL,payload TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS po_features(key TEXT PRIMARY KEY);
    ''')
+   if not db.execute("SELECT 1 FROM po_features WHERE key='almacen-captura-v301'").fetchone():
+    row=db.execute("SELECT modules FROM role_modules WHERE role='almacenista'").fetchone()
+    if row:db.execute("UPDATE role_modules SET modules=?,revision=revision+1 WHERE role='almacenista'",(dumps(list(dict.fromkeys(json.loads(row[0])+['pedidoscompra']))),))
+    db.execute("INSERT INTO po_features VALUES('almacen-captura-v301')")
    if not db.execute("SELECT 1 FROM po_features WHERE key='institucional-managers-v3'").fetchone():
     for role in ('gerente','auxti'):
      row=db.execute('SELECT modules FROM role_modules WHERE role=?',(role,)).fetchone()
@@ -74,7 +78,7 @@ class PurchaseStore:
   return {'revision':r[0] if r else 0,**(json.loads(r[1]) if r else {'empresas':[],'sucursales':[]})}
  def scope(self,actor,company=None,branch=None,capture=False,receive=False,db=None):
   require_module(actor,'pedidoscompra')
-  if capture and actor['role'] not in CAPTURERS:raise PermissionError('Solo Compras y Gerencia pueden capturar, confirmar y registrar compras.')
+  if capture and actor['role'] not in CAPTURERS:raise PermissionError('Solo Compras, Gerencia, Superadministrador, AUXTI y Almacenista pueden capturar, confirmar y registrar compras.')
   if receive and actor['role'] not in RECEIVERS:raise PermissionError('Este perfil no puede recibir compras.')
   access=self.access(actor,db)
   if company is not None:
@@ -215,6 +219,13 @@ class PurchaseStore:
     parts=[{**line,'saldoCompraEntrega':format(max(Decimal(0),Decimal(line['cantidad'])-used.get(line['materialId'],Decimal(0))),'f')} for line in d['partidas']]
     docs.append({'id':id,'numero':d['numero'],'fecha':d['fecha'],'area':d['area'],'partidas':parts})
   return {'requisiciones':docs}
+ def request_detail(self,company,branch,id,actor):
+  self.scope(actor,company,branch);doc=self.request_document(id,actor)
+  if doc['sucursal']!=branch:raise PermissionError('La requisición no pertenece a la sucursal seleccionada.')
+  source=next((r for r in self.req_sources(company,branch,actor)['requisiciones'] if r['id']==id),None)
+  if source is None:source={'partidas':[{**l,'saldoCompraEntrega':'0'} for l in doc['partidas']]}
+  safe={k:doc.get(k,'') for k in ('id','numero','fecha','sucursal','area','solicitante','observaciones','estado')};safe['partidas']=source['partidas']
+  linked=self.orders(actor,company,{'requisicion':id})['pedidos'];return {'requisicion':safe,'pedidos':[{'id':p['id'],'folio':p['folio'],'estado':p['estado'],'proveedor':p['proveedor']['nombre']} for p in linked]}
  def validate_source(self,db,line,branch,actor,unit_factor,quantity,exclude=None):
   id=line.get('requisicionId')
   if not id:return None
@@ -308,6 +319,7 @@ class PurchaseStore:
    if kind=='COMPRA' and reference:
     if db.execute("SELECT 1 FROM po_moves WHERE kind='COMPRA' AND json_extract(payload,'$.empresa')=? AND json_extract(payload,'$.proveedorId')=? AND json_extract(payload,'$.referencia')=?",(doc['empresa'],doc['proveedor']['id'],reference)).fetchone():raise ValueError('La referencia de compra/factura ya fue registrada para este proveedor.')
    id=uuid.uuid4().hex;value={'id':id,'pedidoId':doc['id'],'empresa':doc['empresa'],'proveedorId':doc['proveedor']['id'],'tipo':kind,'folio':self.next_number(db,doc['empresa'],doc['sucursal'],kind,id),'fecha':iso_date(data.get('fecha')) or now()[:10],'creado':now(),'actor':actor['email'],'referencia':reference,'observaciones':text(data.get('observaciones',''),100000),'partidas':prepared,'huella':fingerprint(data)};value['total']=money(sum((Decimal(l['base'])+Decimal(l['impuestos']) for l in prepared),Decimal(0)))
+   if kind=='RECEPCION' and hasattr(self,'inventory'):self.inventory.receipt(db,doc,value,actor)
    db.execute('INSERT INTO po_moves VALUES(?,?,?,?,?)',(id,doc['id'],kind,key,dumps(value)));doc['estado']='COMPRADO' if all(Decimal(l['comprado'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'RECIBIDO' if all(Decimal(l['recibido'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'RECEPCION_PARCIAL';self.update_doc(db,doc,actor,kind);return {'ok':True,'movimiento':value,'documento':self.document(db,doc['id'],actor)}
  def links_for_requisition(self,id,actor):
   require_module(actor,'requisiciones');self.request_document(id,actor);result=[]
@@ -329,6 +341,9 @@ class PurchaseStore:
   self.scope(actor)
   if actor['role']!='superadmin':raise PermissionError('Solo Sistemas puede restaurar datos de Compras.')
   payload=data.get('respaldo');apply=data.get('aplicar') is True
+  if apply:
+   with self.store.connect() as guard:
+    if guard.execute("SELECT 1 FROM sqlite_master WHERE name='inv_ledger'").fetchone() and guard.execute("SELECT 1 FROM inv_ledger WHERE json_extract(payload,'$.tipo')='RECEPCION_COMPRA' LIMIT 1").fetchone():raise Conflict('Hay recepciones integradas al inventario. Recupera una copia completa de data; restaurar solo Compras desajustaría las existencias.')
   if not isinstance(payload,dict) or payload.get('formato')!='GMP_ERP_COMPRAS_3' or payload.get('checksum')!=fingerprint({k:v for k,v in payload.items() if k!='checksum'}) or set(payload.get('tablas',{}))!=set(TABLES):raise ValueError('Respaldo de Compras inválido o dañado.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');current=self.backup(actor,db)

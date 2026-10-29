@@ -1,5 +1,5 @@
 """Cambios autorizados y trazables; nunca reutiliza folios ni altera fechas de emisión."""
-import decimal,json,uuid
+import copy,decimal,json,uuid
 from requisiciones import AREAS,Conflict,now,text,visible_branches,requester_document
 EDITORS={'superadmin','gerente'}
 APPROVERS=EDITORS|{'auxti'}
@@ -37,7 +37,7 @@ class WorkflowStore:
    if kind=='surtir' and doc['estado'] not in ('SOLICITADA','APROBADA'):raise Conflict('La requisición ya tiene un surtido registrado. Solicita un cambio.')
    if kind=='corregir_surtido' and doc['estado'] not in ('SURTIDO','SURTIDA'):raise Conflict('Solo se corrigen entregas ya surtidas.')
    payload=data.get('datos');lines=payload.get('partidas') if isinstance(payload,dict) else None
-   if not isinstance(payload,dict) or set(payload)-{'partidas','area','solicitante','observaciones'} or not isinstance(lines,list) or len(lines)!=len(doc['partidas']):raise ValueError('Captura el surtido de todas las partidas.')
+   if not isinstance(payload,dict) or set(payload)-{'partidas','area','solicitante','observaciones','almacenInventario'} or not isinstance(lines,list) or len(lines)!=len(doc['partidas']):raise ValueError('Captura el surtido de todas las partidas.')
    original={line['materialId']:line for line in doc['partidas']};seen=set();actual=[]
    for line in lines:
     if not isinstance(line,dict) or set(line)!={'materialId','cantidadSurtida'} or type(line.get('materialId')) is not int or line['materialId'] not in original or line['materialId'] in seen or isinstance(line.get('cantidadSurtida'),bool):raise ValueError('Partida de surtido inválida o repetida.')
@@ -50,6 +50,7 @@ class WorkflowStore:
    area=payload.get('area',doc['area']);requester=text(payload.get('solicitante',doc['solicitante']),160);notes=text(payload.get('observaciones',doc['observaciones']),2000)
    if (area!=doc['area'] and area not in self.requisitions.areas.names(db=db)) or not requester:raise ValueError('Área o solicitante inválidos.')
    values={'partidas':actual,'area':area,'solicitante':requester,'observaciones':notes}
+   if payload.get('almacenInventario') is not None:values['almacenInventario']=text(payload['almacenInventario'],100)
   if kind=='modificar':
    if doc['estado'] in ('SURTIDO','SURTIDA'):raise Conflict('La requisición ya tiene surtido registrado. Su entrega e historial se conservan.')
    values=data.get('datos')
@@ -76,6 +77,7 @@ class WorkflowStore:
   doc=self._document(db,change['objetivo'],actor)
   if doc.get('revision',1)!=change['revision']:raise Conflict('La requisición cambió después de la propuesta. Rechaza esta y solicita una nueva.')
   if doc['estado']=='CANCELADA':raise Conflict('La requisición ya fue cancelada.')
+  before=copy.deepcopy(doc)
   revision=doc.get('revision',1);db.execute('INSERT INTO req_document_versions VALUES(?,?,?)',(doc['id'],revision,json.dumps(doc,ensure_ascii=False)))
   if change['tipo']=='cancelar':doc['estado']='CANCELADA';doc['cancelacion']={'motivo':change['motivo'],'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
   elif change['tipo']=='aprobar':doc['estado']='APROBADA';doc['aprobacion']={'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
@@ -91,6 +93,7 @@ class WorkflowStore:
   else:
    doc.update(change['datos'])
    if doc['estado']=='APROBADA':doc['estado']='SOLICITADA';doc.pop('aprobacion',None)
+  if hasattr(self,'inventory'):self.inventory.fulfillment(db,before,doc,change,actor)
   doc['revision']=revision+1;doc['ultimoCambio']={'tipo':change['tipo'],'motivo':change['motivo'],'fecha':now(),'autorizadoPor':actor['email'],'solicitadoPor':change['solicitadoPor']}
   db.execute('UPDATE req_documents SET payload=? WHERE id=?',(json.dumps(doc,ensure_ascii=False),doc['id']))
   return doc
