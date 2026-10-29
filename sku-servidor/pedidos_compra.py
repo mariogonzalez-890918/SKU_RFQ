@@ -146,8 +146,12 @@ class PurchaseStore:
   result=[]
   for r in rows:
    c=costs.get(r['id'],{});factor=c.get('factor') or infer_factor(r)[0]
-   try:tax=rate(r.get('impuestoCompra') or taxes.get(r.get('source_key')))
-   except (ValueError,ArithmeticError):tax=None
+   tax=None
+   # Relee la tasa de compra del Excel guardado: corrige también maestros ya cargados.
+   for candidate in (taxes.get(r.get('source_key')),r.get('impuestoCompra')):
+    try:tax=rate(candidate)
+    except (ValueError,ArithmeticError):continue
+    if tax is not None:break
    result.append({'materialId':r['id'],'sku':r.get('sku',''),'nombre':r['nombre'],'activo':r.get('estado')!='INACTIVO','unidadCompra':r.get('unidadCompra') or c.get('unidadCompra') or r['unidad'],'unidadEntrega':r['unidad'],'factor':factor,'precioCompra':c.get('precioCompra') or r.get('precioCompra') or None,'costoEntrega':c.get('costoEntrega') or r.get('costoBaseMaestro') or None,'impuesto':tax,'proveedor':r.get('proveedor','')})
   self.cache=(stamp,result);return {'materiales':copy.deepcopy(result)}
  def sequence(self,db,company,branch,kind):

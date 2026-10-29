@@ -24,7 +24,7 @@ jobs:
       - name: Instalar dependencias
         run: python -m pip install -r requirements-dev.txt
       - name: Probar instalación y respaldos
-        run: python -m unittest discover -s tests -v
+        run: python tools/test_all.py
       - name: Probar menú de celular y tablet
         run: |
           node tests/mobile_menu_regression.mjs
@@ -38,6 +38,6 @@ jobs:
         run: |
           $tag = "windows-${{ github.run_number }}-${{ github.run_attempt }}"
           $releaseOptions = @()
-          if ("3.1.0" -match "rc|beta|alpha") { $releaseOptions += "--prerelease" }
-          gh release create $tag dist-public/GMP_ERP.exe dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe GMP_ERP_Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "GMP ERP v3.1.0 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
+          if ("3.1.1" -match "rc|beta|alpha") { $releaseOptions += "--prerelease" }
+          gh release create $tag dist-public/GMP_ERP.exe dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe GMP_ERP_Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "GMP ERP v3.1.1 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
 

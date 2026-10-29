@@ -55,7 +55,7 @@ def report_xlsx(rows,sheet_name="Reporte"):
   return value
  def cell(v,i,j):
   ref=column(j)+str(i)
-  numeric=i>1 and rows[0][j-1] in ('Emitidas','Borradores','Canceladas','Cantidad','Precio con IVA','Precio con impuesto','Tasa %','IVA %','Subtotal','IVA incluido','IEPS incluido','Impuesto incluido','Total','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO') and re.fullmatch(r'\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
+  numeric=i>1 and rows[0][j-1] in ('Emitidas','Borradores','Canceladas','Cantidad','Precio con IVA','Precio con impuesto','Tasa %','IVA %','Subtotal','IVA incluido','IEPS incluido','Impuesto incluido','Total','PRECIO PUBLICO','PRECIO RUTA','PRECIO DESPACHO','FISICO','ENTRADA','SALIDA','SALDO_ANTERIOR','SALDO','COSTO_UNITARIO','IMPORTE','COSTO_UNITARIO_SIN_IMPUESTO','VALOR','INICIAL','INICIAL_PERIODO','ENTRADAS','SALIDAS','EXISTENCIA_AL_CORTE','EXISTENCIA_ACTUAL') and re.fullmatch(r'-?\d+(?:\.\d+)?',v) and len(v.replace('.','').lstrip('0'))<=15
   return '<c r="'+ref+'"><v>'+v+'</v></c>' if numeric else '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+escape(v)+'</t></is></c>'
  sheet='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join('<row r="'+str(i)+'">'+''.join(cell(v,i,j) for j,v in enumerate(row,1))+'</row>' for i,row in enumerate(rows,1))+'</sheetData></worksheet>'
  out=io.BytesIO()
@@ -66,7 +66,7 @@ def report_xlsx(rows,sheet_name="Reporte"):
   z.writestr('xl/_rels/workbook.xml.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');z.writestr('xl/worksheets/sheet1.xml',sheet)
  return out.getvalue()
 
-def report_pdf(rows,title="GMP ERP · Reporte comercial"):
+def report_pdf(rows,title="GMP ERP · Reporte comercial",subtitle="Documentos cancelados excluidos de los totales."):
  from reportlab.lib import colors
  from reportlab.lib.pagesizes import A4,landscape
  from reportlab.lib.styles import ParagraphStyle
@@ -74,4 +74,4 @@ def report_pdf(rows,title="GMP ERP · Reporte comercial"):
  out=io.BytesIO();page=landscape(A4);style=ParagraphStyle('cm',fontName='Helvetica',fontSize=7,leading=9);heading=ParagraphStyle('heading',fontName='Helvetica-Bold',fontSize=16,leading=22)
  cells=[[Paragraph(esc(v),style) for v in row] for row in rows];table=LongTable(cells,repeatRows=1,colWidths=[(page[0]-40)/len(rows[0])]*len(rows[0]))
  table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#eae1e7')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f6f7f8')]),('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),7),('TOPPADDING',(0,0),(-1,-1),7)]))
- SimpleDocTemplate(out,pagesize=page,leftMargin=20,rightMargin=20,topMargin=24,bottomMargin=24).build([Paragraph(html.escape(title),heading),Paragraph('Documentos cancelados excluidos de los totales.',style),Spacer(1,12),table]);return out.getvalue()
+ SimpleDocTemplate(out,pagesize=page,leftMargin=20,rightMargin=20,topMargin=24,bottomMargin=24).build([Paragraph(html.escape(title),heading),Paragraph(html.escape(subtitle),style),Spacer(1,12),table]);return out.getvalue()

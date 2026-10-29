@@ -56,6 +56,17 @@ class PurchaseV3Tests(fixtures.ModuleBackupTests):
   for role in ('auxti','almacenista'):
    who=role+'@example.test';self.value('/api/users',{'email':who,'name':role,'role':role,'password':self.password,'active':True,'almacenes':['EJIDOS']});self.po('accesos',{'email':who,'revision':0,'empresas':[self.company],'sucursales':['EJIDOS']});actor=self.login(who);self.assertTrue(self.po('meta',actor=actor)['puedeCapturar']);created=self.po('pedidos',{'proveedor':self.vendor,'clave':uuid.uuid4().hex,'partidas':[{'materialId':self.material['materialId'],'cantidad':'1','tipoUnidad':'ENTREGA','precio':'10','impuesto':'8'}]},actor);self.assertEqual(created['documento']['creador'],who)
    if role=='almacenista':self.assertFalse(self.po('meta',actor=actor)['puedeSeries'])
+ def test_purchase_tax_column_priority_existing_master_and_manual_override(self):
+  headers={**fixtures.HEADERS,'J':'IMPUESTO DE COMPRA','AC':'IMPUESTO'}
+  rows=[fixtures.product('CON IVA',B='TAX16',J='0.16',AC='002 - IVA'),fixtures.product('CON IEPS',B='TAX08',J='0.08',AC='003 - IEPS'),fixtures.product('SIN IVA',B='TAX00',J='0',AC='002 - IVA')]
+  self.value('/api/requisiciones/maestro',{'archivo':'IMPUESTOS.xlsx','contenido':fixtures.workbook(rows,headers=headers)})
+  # Simula la columna SAT que guardaron versiones anteriores. El Excel original se conserva.
+  with self.store.connect() as db:
+   for id,p in db.execute('SELECT id,payload FROM req_materials').fetchall():
+    value=json.loads(p);value['impuestoCompra']='002 - IVA';db.execute('UPDATE req_materials SET payload=? WHERE id=?',(json.dumps(value),id))
+  materials={m['sku']:m for m in self.po('materiales')['materiales']};self.assertEqual({sku:m['impuesto'] for sku,m in materials.items() if sku.startswith('TAX')},{'TAX16':'16','TAX08':'8','TAX00':'0'})
+  for sku,tax in (('TAX16','16'),('TAX08','8'),('TAX00','0')):
+   line={'materialId':materials[sku]['materialId'],'cantidad':'1','tipoUnidad':'COMPRA','precio':'100'};doc=self.order(partidas=[line]);self.assertEqual(doc['partidas'][0]['impuesto'],tax);override=self.order(partidas=[{**line,'impuesto':'0' if tax!='0' else '16'}]);self.assertEqual(override['partidas'][0]['impuesto'],'0' if tax!='0' else '16')
 
 for name in fixtures.ModuleBackupTests.__dict__:
  if name.startswith('test_') and name not in PurchaseV3Tests.__dict__:setattr(PurchaseV3Tests,name,None)

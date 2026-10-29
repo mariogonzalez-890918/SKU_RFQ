@@ -33,3 +33,21 @@ Se consultaron los modelos oficiales de Odoo 14 para validación de inventarios 
 ## Correcciones incluidas
 
 Captura de compras habilitada para Gerencia, Compras, Superadministrador, AUXTI y Almacenista; series editables por los cuatro primeros. Detalle real de requisiciones vinculadas; costo del maestro automático en plantillas de proveedor por unidad; observaciones generales/de partida y condiciones en exportaciones institucionales; tiempos de espera y mensajes de permisos diferenciados.
+
+### Corrección 3.1.1
+
+Compras toma la tasa de IMPUESTO DE COMPRA antes que el campo IMPUESTO de código SAT. Relee el Excel ya guardado, sin necesitar recargar ni reemplazar el maestro. Se respetan 0%, 8% IEPS y 16% IVA y se permite cambiar la tasa en la partida. Las plantillas muestran el impuesto automático actual del maestro y permiten personalizarlo. No se modifican pedidos históricos.
+
+Kárdex 3.1.1: consulta cronológica por SKU, fechas y tipo, con entradas de compras recibidas, salidas de surtido real y saldo por material. El Excel usa esos mismos filtros. Existencias muestra todo el maestro; los físicos no capturados siguen pendientes. Solo Gerencia, AUXTI y Superadministrador ven valuaciones, costos y precios de inventario; se eliminan de la API y exportaciones de Compras/Almacén dentro de Inventarios. Estos accesos no cambian los permisos comerciales del módulo de pedidos de compra.
+
+Las solicitudes de traspaso permiten seleccionar destinos pendientes de inventario inicial, pero el envío exige ambos inventarios autorizados. La ventana muestra compras realmente recibidas por SKU, cantidades surtidas netas y disponibilidad física, con detalle de recepciones. La pestaña Recepciones de compra permite consultar folios, proveedores, cantidades recibidas y su equivalencia UM_ENTREGA; las recepciones históricas previas a activación se consultan sin duplicarlas como nuevas entradas.
+
+### Kárdex, recepciones y conceptos
+
+El Kárdex tiene filtros Desde/Hasta, entradas/salidas, tipo de movimiento, SKU y almacén, incluyendo todos los autorizados. El resumen separa inicial del periodo, entradas, salidas, existencia al corte y existencia actual por SKU/unidad/almacén; los filtros de tipo/dirección afectan el detalle y no ocultan movimientos en los saldos generales. Descarga detalle y reporte general en Excel, o resumen en PDF.
+
+La recepción del proveedor nace del pedido confirmado desde la cotización. La recepción entre almacenes confirma cantidades del traspaso enviado. Son operaciones distintas y se muestran separadas. La cancelación del surtido genera devolución al almacén. La cancelación/devolución de una recepción de proveedor conserva el original y registra una salida de reversa cuando hay inventario activo; exige material suficiente y no puede dejar compras/facturas sin recepción. Almacén solicita y Gerencia/AUXTI/Superadministrador autorizan. Se muestran estado y motivo de cancelación en consultas y PDF del original.
+
+Conceptos configurables por Gerencia/AUXTI/Superadministrador: devoluciones de área, recuperación, otras entradas; merma, caducidad, rotura/daño, muestras y otras salidas. Pueden agregarse, editarse o desactivarse, conservando el nombre usado en el historial. Las operaciones manuales de Almacén requieren autorización. Los conceptos automáticos de compra, requisición y traspaso permanecen ligados a sus documentos.
+
+Se consultaron como referencia las operaciones de [ubicaciones y tránsito de Odoo 14](https://github.com/odoo/odoo/blob/14.0/addons/stock/models/stock_location.py), [devoluciones](https://github.com/odoo/odoo/blob/14.0/addons/stock/wizard/stock_picking_return.py) y [mermas](https://github.com/odoo/odoo/blob/14.0/addons/stock/models/stock_scrap.py). Los conceptos de GMP ERP son un catálogo configurable propio.

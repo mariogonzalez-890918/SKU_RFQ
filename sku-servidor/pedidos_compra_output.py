@@ -20,6 +20,7 @@ def order_pdf(doc,movement=None):
  if logo.exists():story.append(Image(str(logo),width=48,height=48,hAlign='RIGHT'))
  story.extend([p(company['nombre'],label),p(company.get('rfc','')+'\n'+company.get('domicilio',''),small),Spacer(1,12),p(kind+' #'+folio,title)])
  info=Table([[p('Proveedor',label),p('Envío / sucursal',label)],[p(vendor['nombre']+'\n'+vendor.get('rfc','')+'\n'+vendor.get('domicilio','')+'\n'+vendor.get('correo','')+'\n'+vendor.get('telefono',''),normal),p(doc['sucursal']+'\nRazón social: '+company['nombre'],normal)]],colWidths=[265,262]);info.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),12)]));story.extend([info,Spacer(1,10),p('Fecha del pedido: '+display_date(doc['fechaPedido'])+' · Entrega: '+display_date(doc.get('fechaEntrega',''))+'\nReferencia del proveedor: '+doc.get('referenciaProveedor','')+'\nEstado: '+doc['estado'],normal)])
+ if movement and movement.get('cancelacion'):story.extend([p('RECEPCIÓN CANCELADA / DEVUELTA',label),p(display_date(movement['cancelacion']['fecha'])+' · '+movement['cancelacion']['motivo'],normal)])
  if movement:story.append(p('Origen: '+doc['folio']+' · Fecha: '+display_date(movement['fecha'])+' · Referencia: '+movement.get('referencia',''),normal))
  rows=[[p(v,white) for v in ['DESCRIPCIÓN','IMPUESTO','FECHA REQ.','CANT. / UNIDAD','PRECIO UNITARIO','MONTO']]];lines=doc['partidas'];selected={l['linea']:l for l in movement['partidas']} if movement else None;base=tax=Decimal(0)
  for l in lines:

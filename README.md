@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.0
+# GMP ERP · Versión 3.1.1
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 

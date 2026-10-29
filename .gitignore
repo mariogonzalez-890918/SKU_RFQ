@@ -117,3 +117,5 @@
 !/docs/v3.1/
 /docs/v3.1/*
 !/docs/v3.1/*.md
+
+!/tools/test_all.py
