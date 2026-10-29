@@ -25,12 +25,12 @@ class WorkflowStore:
   return doc
  def _prepare(self,db,data,actor):
   kind=data.get('tipo');reason=text(data.get('motivo',''),1000)
-  if not reason:raise ValueError('Escribe el motivo del cambio.')
+  if not reason and kind not in ('cancelar','surtir','corregir_surtido'):raise ValueError('Escribe el motivo del cambio.')
   if kind not in ('cancelar','modificar','aprobar','surtir','corregir_surtido'):raise ValueError('Tipo de cambio inválido. Los costos solo los editan Gerente y Superadministrador.')
   id=data.get('objetivo');doc=self._document(db,id,actor);revision=data.get('revision')
   if type(revision) is not int or revision!=doc.get('revision',1):raise Conflict('La solicitud cambió. Ábrela de nuevo antes de proponer el cambio.')
   if doc['estado']=='CANCELADA':raise ValueError('La solicitud ya está cancelada; el folio permanece reservado.')
-  values={}
+  values={};excess=[]
   if kind=='aprobar' and doc['estado']!='SOLICITADA':raise Conflict('Solo se aprueban requisiciones solicitadas.')
   if kind in ('surtir','corregir_surtido'):
    if actor['role'] not in APPROVERS|{'almacenista'}:raise PermissionError('Solo Almacenista, Superadministrador, Gerencia o AUXTI registran el surtido.')
@@ -43,7 +43,9 @@ class WorkflowStore:
     if not isinstance(line,dict) or set(line)!={'materialId','cantidadSurtida'} or type(line.get('materialId')) is not int or line['materialId'] not in original or line['materialId'] in seen or isinstance(line.get('cantidadSurtida'),bool):raise ValueError('Partida de surtido inválida o repetida.')
     try:q=decimal.Decimal(str(line['cantidadSurtida']))
     except decimal.InvalidOperation:raise ValueError('Cantidad surtida inválida.')
-    if not q.is_finite() or not 0<=q<=decimal.Decimal(original[line['materialId']]['cantidad']) or q.as_tuple().exponent < -6:raise ValueError('El surtido debe estar entre cero y lo solicitado, con hasta seis decimales. Para entregar más solicita una corrección autorizada.')
+    if not q.is_finite() or not 0<=q<=999999999 or q.as_tuple().exponent < -6:raise ValueError('El surtido debe estar entre cero y 999999999, con hasta seis decimales.')
+    source=original[line['materialId']];requested=decimal.Decimal(source['cantidad'])
+    if q>requested:excess.append({'materialId':line['materialId'],'sku':source['sku'],'nombre':source['nombre'],'unidad':source['unidad'],'solicitada':source['cantidad'],'propuesta':format(q,'f'),'exceso':format(q-requested,'f')})
     seen.add(line['materialId']);actual.append({'materialId':line['materialId'],'cantidadSurtida':format(q,'f')})
    if not any(decimal.Decimal(r['cantidadSurtida'])>0 for r in actual):raise ValueError('Registra al menos una cantidad surtida mayor a cero.')
    if kind=='surtir' and actor['role']=='almacenista' and any(field in payload and payload[field]!=doc[field] for field in ('area','solicitante','observaciones')):raise PermissionError('Los datos originales de la requisición requieren una corrección autorizada; captura la entrega en observaciones de surtido.')
@@ -72,7 +74,7 @@ class WorkflowStore:
      if not source or source['estado']!='ACTIVO' or not source['unidad']:raise ValueError('Material no disponible o sin unidad de entrega.')
     snapshots.append({'materialId':idm,'cantidad':format(q,'f'),'observaciones':note,**{key:source[key] for key in ('sku','nombre','unidad','proveedor')}})
    values={'area':area,'solicitante':requester,'observaciones':notes,'partidas':snapshots}
-  return {'tipo':kind,'objetivo':doc['id'],'folio':doc['numero'],'sucursal':doc['sucursal'],'revision':revision,'motivo':reason,'datos':values}
+  return {'tipo':kind,'objetivo':doc['id'],'folio':doc['numero'],'sucursal':doc['sucursal'],'revision':revision,'motivo':reason,'datos':values,'excedentes':excess}
  def _apply(self,db,change,actor):
   doc=self._document(db,change['objetivo'],actor)
   if doc.get('revision',1)!=change['revision']:raise Conflict('La requisición cambió después de la propuesta. Rechaza esta y solicita una nueva.')
@@ -109,7 +111,8 @@ class WorkflowStore:
    shortages=self.inventory.fulfillment_preview(db,old,c,actor) if hasattr(self,'inventory') else []
    if shortages:c.update({'inventarioInsuficiente':shortages,'alertaInventario':'Pedido con menos inventario: requiere aprobación para registrar saldo negativo.'})
    if shortages and c['tipo']=='surtir':c.update({'inventarioNegativoAutorizado':True,'inventarioNegativoDirecto':True,'alertaInventario':'Surtido registrado con menos inventario: se generó saldo negativo en el Kárdex.'})
-   if c['tipo']=='surtir' or not shortages and (actor['role'] in EDITORS or actor['role']=='auxti' and not removed):result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido directo registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
+   if c['excedentes']:c['alertaInventario']='Surtido mayor a lo solicitado: pendiente de autorización de Gerencia, AUXTI o Superadministrador. No se ha descontado inventario.'
+   if not c['excedentes'] and (c['tipo']=='surtir' or not shortages and (actor['role'] in EDITORS or actor['role']=='auxti' and not removed)):result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido directo registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
    if c['tipo']=='surtir' and result:
     for pending_id,payload in db.execute("SELECT id,payload FROM req_changes WHERE status='PENDIENTE' AND json_extract(payload,'$.objetivo')=? AND json_extract(payload,'$.tipo')='aprobar'",(c['objetivo'],)).fetchall():
      pending=json.loads(payload)
@@ -128,11 +131,12 @@ class WorkflowStore:
  def decide(self,id,data,actor):
   if actor['role'] not in APPROVERS:raise PermissionError('Solo Superadministrador, AUXTI y Gerente pueden aprobar o rechazar solicitudes.')
   approved=data.get('aprobar');comment=text(data.get('comentario',''),1000)
-  if type(approved) is not bool or not comment:raise ValueError('Indica la decisión y su comentario.')
+  if type(approved) is not bool:raise ValueError('Indica aprobar o rechazar.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');row=db.execute('SELECT payload FROM req_changes WHERE id=?',(id,)).fetchone()
    if not row:raise ValueError('Cambio no encontrado.')
    c=json.loads(row[0])
+   if not comment and c['tipo'] not in ('cancelar','surtir','corregir_surtido'):raise ValueError('Indica el comentario de la decisión.')
    if c['sucursal'] not in visible_branches(actor):raise PermissionError('No tienes acceso a esta sucursal.')
    if c['estado']!='PENDIENTE':raise Conflict('El cambio ya fue resuelto. Actualiza la lista.')
    result=None
@@ -160,7 +164,7 @@ class WorkflowStore:
      access=db.execute('SELECT almacenes FROM user_requisition_access WHERE email=?',(c['solicitadoPor'],)).fetchone();modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('almacenista',)).fetchone()
      if not access or c['sucursal'] not in json.loads(access[0]) or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('El solicitante perdió acceso al almacén o módulo. Rechaza la propuesta.')
     if c.get('inventarioInsuficiente'):
-     if data.get('autorizarNegativo') is not True:raise ValueError('Confirma la autorización del saldo negativo por inventario insuficiente.')
+     if c['tipo']!='surtir' and data.get('autorizarNegativo') is not True:raise ValueError('Confirma la autorización del saldo negativo por inventario insuficiente.')
      c['inventarioNegativoAutorizado']=True
     result=self._apply(db,c,actor)
     if c['tipo']=='surtir':

@@ -1,4 +1,4 @@
-# GMP ERP 3.1.3 · Almacenes
+# GMP ERP 3.1.4 · Almacenes
 
 Se crea un almacén por razón social y sucursal vinculada: EJIDOS, SAN PABLO, CUAUTITLAN y EJE 8. La razón social se administra en la configuración comercial. Sistemas y AUXTI asignan empresas y sucursales en Compras → Accesos; Inventarios respeta esa misma asignación y los almacenes autorizados del usuario. El módulo se habilita inicialmente para Compras, Gerencia, Almacenista, AUXTI y Superadministrador; Sistemas puede cambiar los accesos por perfil. Requisición nunca recibe acceso a costos.
 
@@ -59,3 +59,7 @@ Filtros propios por sucursal, proveedor, estado y fechas de pedido o entrega. Ca
 ### Exportación Kárdex 3.1.3
 
 Imprimir Kárdex abre una vista de impresión con resumen y detalle; permite elegir impresora o Guardar PDF desde el navegador. Descargar Kárdex PDF incluye ambos apartados. Descargar Kárdex XML contiene filtros, resumen por material y movimientos. Todos respetan el alcance de almacenes y la visibilidad de costos del perfil. Las fechas se presentan dd/mm/yyyy; SKU conserva ceros iniciales.
+
+### Surtido y navegación 3.1.4
+
+Resumen de existencias tiene su propia pestaña, con los filtros de fechas, SKU y almacén elegidos en Kárdex. Kárdex muestra únicamente el detalle de movimientos. Las observaciones de surtido y cancelación de requisiciones son opcionales, incluida su resolución. Si se captura más de lo solicitado, se conserva el documento sin cambios y no se afecta inventario hasta la autorización de Gerencia, AUXTI o Superadministrador; aplica incluso cuando uno de estos perfiles propone el excedente. Rechazar conserva los saldos. El reporte contabiliza la cantidad real solo después de aprobar, manteniendo la solicitada original.

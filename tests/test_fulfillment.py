@@ -23,7 +23,7 @@ class FulfillmentTests(unittest.TestCase):
  def test_scope_permissions_invalid_amounts_and_revision(self):
   doc=self.create();payload={'tipo':'surtir','objetivo':doc['id'],'revision':1,'motivo':'Entrega','datos':{'partidas':[{'materialId':m['id'],'cantidadSurtida':'1'} for m in self.materials]}}
   self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.requester)[0],403);approved=self.change(doc,'aprobar',self.manager)['documento'];payload['revision']=approved['revision']
-  for invalid in ('-1','4','NaN','Infinity','0.0000001',''):
+  for invalid in ('-1','1000000000','NaN','Infinity','0.0000001',''):
    payload['datos']['partidas'][0]['cantidadSurtida']=invalid;self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.warehouse)[0],400)
   payload['datos']['partidas'][0]['cantidadSurtida']='1';payload['datos']['solicitante']='Cambio sin autorizar';self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.warehouse)[0],403);payload['datos'].pop('solicitante');other=self.user('other@example.com','requisicion',sucursales=['EJIDOS']);self.assertEqual(self.case.call('/api/requisiciones/cambios',{'tipo':'cancelar','objetivo':doc['id'],'revision':approved['revision'],'motivo':'Ajena'},other)[0],403)
   wrong=self.user('wrong@example.com','almacenista',almacenes=['SAN PABLO']);self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,wrong)[0],403);payload['revision']=1;self.assertEqual(self.case.call('/api/requisiciones/cambios',payload,self.warehouse)[0],409)
