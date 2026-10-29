@@ -63,3 +63,7 @@ Imprimir Kárdex abre una vista de impresión con resumen y detalle; permite ele
 ### Surtido y navegación 3.1.4
 
 Resumen de existencias tiene su propia pestaña, con los filtros de fechas, SKU y almacén elegidos en Kárdex. Kárdex muestra únicamente el detalle de movimientos. Las observaciones de surtido y cancelación de requisiciones son opcionales, incluida su resolución. Si se captura más de lo solicitado, se conserva el documento sin cambios y no se afecta inventario hasta la autorización de Gerencia, AUXTI o Superadministrador; aplica incluso cuando uno de estos perfiles propone el excedente. Rechazar conserva los saldos. El reporte contabiliza la cantidad real solo después de aprobar, manteniendo la solicitada original.
+
+### Traspasos 3.1.5
+
+Agregar partida admite físico cero, negativo o pendiente. La solicitud no mueve inventario. Ya no se exige inventario inicial activo para enviar o recibir; los saldos previos al conteo son provisionales. Si el envío deja negativo, únicamente Gerencia, AUXTI o Superadministrador pueden confirmarlo marcando la autorización expresa. Almacenista no puede forzar este permiso. La recepción confirma lo realmente recibido y aumenta destino, incluso si aún conserva saldo negativo. El concepto tiene columna propia en Kárdex y PDF/impresión. Costos exclusivos de los tres autorizadores.

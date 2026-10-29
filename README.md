@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.4
+# GMP ERP · Versión 3.1.5
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -8,7 +8,9 @@ Aplicación para Windows y servidor local con generadores de SKU de compras y ve
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
 
-## Cambios 3.1.4
+## Cambios 3.1.5
+
+Traspasos permite armar solicitudes aunque falte conteo o el físico sea cero/negativo. Enviar sin suficiente stock requiere autorización explícita de Gerencia, AUXTI o Superadministrador; no se exige activar el inventario inicial. El destino aumenta solo al confirmar cantidades recibidas. Kárdex tiene columna propia Concepto de movimiento y mantiene costos ocultos para Almacenista en pantalla y exportaciones.
 
 Resumen de existencias tiene su propio botón; Kárdex conserva el detalle. Las observaciones de cancelación y surtido son opcionales. Surtir por encima de lo solicitado requiere autorización de Gerencia, AUXTI o Superadministrador antes de modificar documento, costos o inventario. Se conserva la cantidad solicitada original y el surtido real autorizado.
 

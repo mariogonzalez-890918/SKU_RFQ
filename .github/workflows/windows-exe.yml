@@ -38,6 +38,6 @@ jobs:
         run: |
           $tag = "windows-${{ github.run_number }}-${{ github.run_attempt }}"
           $releaseOptions = @()
-          if ("3.1.4" -match "rc|beta|alpha") { $releaseOptions += "--prerelease" }
-          gh release create $tag dist-public/GMP_ERP.exe dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe GMP_ERP_Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "GMP ERP v3.1.4 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
+          if ("3.1.5" -match "rc|beta|alpha") { $releaseOptions += "--prerelease" }
+          gh release create $tag dist-public/GMP_ERP.exe dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe GMP_ERP_Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "GMP ERP v3.1.5 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
 

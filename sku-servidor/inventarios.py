@@ -106,7 +106,7 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
    if ref not in (None,''):avg=dec(ref)
    elif c.get('precioCompra') not in (None,'') and c.get('factor') not in (None,'','0'):avg=dec(c['precioCompra'])/dec(c['factor'],True)
   after=q+delta
-  if after<0 and not allow_negative:raise ValueError('Existencia insuficiente para '+m['sku']+': disponible '+fmt(q)+' '+m['unidad']+'.')
+  if delta<0 and after<0 and not allow_negative:raise ValueError('Existencia insuficiente para '+m['sku']+': disponible '+fmt(q)+' '+m['unidad']+'.')
   applied=cost if delta>0 else avg
   if applied is None:raise ValueError('Falta costo de entrega del maestro para '+m['sku']+'.')
   applied=dec(fmt(applied));newcost=(applied if q<=0 else (q*avg+delta*applied)/after if after>0 else applied) if delta>0 else avg
@@ -306,10 +306,12 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
     person=text(data.get('persona',''),200)
     if action=='enviar':
      if doc['estado']!='SOLICITADA' or not person:raise ValueError('Indica quién entrega en una solicitud pendiente.')
-     if not self.scope(actor,doc['origen'],db)['activo']:raise ValueError('Autoriza primero el inventario inicial de origen.')
-     self.destination(db,doc['destino'])
+     self.destination(db,doc['destino'],False)
+     insufficient=any(Decimal((self.balance(db,doc['origen'],m['sku']) or {}).get('cantidad','0'))<Decimal(m['cantidad']) for m in doc['partidas'])
+     if insufficient and (actor['role'] not in APPROVERS or data.get('autorizarNegativo') is not True):raise PermissionError('Existencia insuficiente: Gerencia, AUXTI o Superadministrador deben confirmar la salida autorizando el saldo negativo.')
+     if insufficient:doc['autorizacionNegativo']={'fecha':now(),'autorizadoPor':actor['email']}
      for m in doc['partidas']:
-      move=self.post(db,doc['origen'],m,-Decimal(m['cantidad']),None,'envio:'+doc['id']+':'+m['sku'],'TRASPASO_SALIDA',actor,doc['folio'],doc['motivo'],{'entrega':person,'destino':doc['destino']});m['costo']=move['costoUnitario'];m['importe']=fmt(Decimal(m['cantidad'])*Decimal(m['costo']))
+      move=self.post(db,doc['origen'],m,-Decimal(m['cantidad']),None,'envio:'+doc['id']+':'+m['sku'],'TRASPASO_SALIDA',actor,doc['folio'],doc['motivo'],{'entrega':person,'destino':doc['destino'],'saldoNegativoAutorizado':insufficient},allow_negative=insufficient);m['costo']=move['costoUnitario'];m['importe']=fmt(Decimal(m['cantidad'])*Decimal(m['costo']))
      doc.update({'estado':'EN_TRANSITO','entrega':person,'enviadoPor':actor['email'],'fechaEnvio':now(),'costoTransportado':fmt(sum((Decimal(m['importe']) for m in doc['partidas']),Decimal(0)))})
     elif action in ('recibir','devolver'):
      if doc['estado'] not in ('EN_TRANSITO','PARCIAL') or not person:raise ValueError('Indica quién recibe y un traspaso en tránsito.')
