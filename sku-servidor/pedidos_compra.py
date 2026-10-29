@@ -197,13 +197,15 @@ class PurchaseStore:
     try:d=self.document(db,id,actor)
     except PermissionError:continue
     if company and d['empresa']!=company or filters.get('sucursal') and d['sucursal']!=filters['sucursal'] or filters.get('estado') and d['estado']!=filters['estado'] or filters.get('proveedor') and d['proveedor']['id']!=filters['proveedor']:continue
-    if start and d['fechaPedido']<start or end and d['fechaPedido']>end:continue
+    date=d.get('fechaEntrega','') if filters.get('campoFecha')=='entrega' else d['fechaPedido']
+    if (start or end) and not date or start and date<start or end and date>end:continue
     if filters.get('requisicion') and not any(l.get('requisicionId')==filters['requisicion'] for l in d['partidas']):continue
-    result.append(d)
+    d['movimientos']=[json.loads(p) for p, in db.execute('SELECT payload FROM po_moves WHERE order_id=? ORDER BY rowid',(id,))];result.append(d)
   groups=[]
   for branch in BRANCHES:
    docs=[d for d in result if d['sucursal']==branch];valid=[d for d in docs if d['estado'] not in ('BORRADOR','ENVIADO','CANCELADO')];groups.append({'sucursal':branch,'emitidas':sum(d['estado'] not in ('BORRADOR','CANCELADO') for d in docs),'borradores':sum(d['estado']=='BORRADOR' for d in docs),'canceladas':sum(d['estado']=='CANCELADO' for d in docs),'total':money(sum((Decimal(d['total']) for d in valid),Decimal(0)))})
-  return {'pedidos':result,'sucursales':groups}
+  from pedidos_compra_output import analyze_report
+  return analyze_report({'pedidos':result,'sucursales':groups})
  def request_document(self,id,actor):
   doc=self.req.get(id,actor)
   if doc is None:raise PermissionError('Requisición no disponible en tu alcance.')

@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.1
+# GMP ERP · Versión 3.1.2
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -7,6 +7,12 @@ Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos s
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
+## Cambios 3.1.2
+
+Movimiento de almacén agrupa entradas y salidas manuales y acceso a ajustes; su uso es exclusivo de Gerencia, AUXTI y Superadministrador. Las recepciones y surtidos registran Kárdex aunque falte el conteo inicial. Un surtido que excede el saldo queda pendiente hasta autorizar expresamente el negativo. Las salidas históricas faltantes se concilian una vez, verificando antes que el conteo físico no las haya descontado ya. El saldo previo al conteo se identifica como provisional.
+
+Compras incluye filtros propios y reportes detallados por pedido, partida, proveedor y sucursal, con cantidades pedidas, recibidas, pendientes y compradas, y exportación Excel de cinco hojas y PDF.
 
 ## Imágenes y navegación
 

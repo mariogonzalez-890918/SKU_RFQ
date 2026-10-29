@@ -96,17 +96,20 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
  def balance(self,db,w,sku):
   row=db.execute('SELECT unit,qty,cost,payload FROM inv_balances WHERE warehouse=? AND sku=?',(w,sku)).fetchone()
   return {'unidad':row[0],'cantidad':row[1],'costo':row[2],**json.loads(row[3])} if row else None
- def post(self,db,w,m,delta,cost,source,kind,actor,reference='',notes='',extra=None):
+ def post(self,db,w,m,delta,cost,source,kind,actor,reference='',notes='',extra=None,allow_negative=False):
   m={**m,'sku':str(m['sku']).strip().upper()}
   if db.execute('SELECT 1 FROM inv_ledger WHERE source=?',(source,)).fetchone():raise Conflict('Este movimiento ya fue aplicado.')
   old=self.balance(db,w,m['sku']);q=Decimal(old['cantidad']) if old else Decimal(0);avg=Decimal(old['costo']) if old else Decimal(0)
-  if old is None and kind not in ('INICIAL','AJUSTE'):raise ValueError('Falta autorizar el físico de '+m['sku']+' en este almacén; un conteo vacío no equivale a cero.')
   if old and norm(old['unidad'])!=norm(m['unidad']):raise Conflict('La unidad del maestro cambió. Resuelve la equivalencia antes de mover '+m['sku']+'.')
+  if old is None and delta<0 and allow_negative:
+   row=db.execute('SELECT payload FROM req_costs WHERE material_id=?',(m.get('materialId'),)).fetchone();c=json.loads(row[0]) if row else {};ref=c.get('costoEntrega')
+   if ref not in (None,''):avg=dec(ref)
+   elif c.get('precioCompra') not in (None,'') and c.get('factor') not in (None,'','0'):avg=dec(c['precioCompra'])/dec(c['factor'],True)
   after=q+delta
-  if after<0:raise ValueError('Existencia insuficiente para '+m['sku']+': disponible '+fmt(q)+' '+m['unidad']+'.')
+  if after<0 and not allow_negative:raise ValueError('Existencia insuficiente para '+m['sku']+': disponible '+fmt(q)+' '+m['unidad']+'.')
   applied=cost if delta>0 else avg
   if applied is None:raise ValueError('Falta costo de entrega del maestro para '+m['sku']+'.')
-  applied=dec(fmt(applied));newcost=(q*avg+delta*applied)/after if delta>0 and after else avg
+  applied=dec(fmt(applied));newcost=(applied if q<=0 else (q*avg+delta*applied)/after if after>0 else applied) if delta>0 else avg
   snapshot={'materialId':m.get('materialId'),'nombre':m.get('nombre','')}
   db.execute('INSERT INTO inv_balances VALUES(?,?,?,?,?,?) ON CONFLICT(warehouse,sku) DO UPDATE SET qty=excluded.qty,cost=excluded.cost,payload=excluded.payload',(w,m['sku'],m['unidad'],fmt(after),fmt(newcost),dumps(snapshot)))
   cycle=db.execute('SELECT cycle FROM inv_warehouses WHERE id=?',(w,)).fetchone()[0];created=now();value={'sku':m['sku'],'nombre':m.get('nombre',''),'unidad':m['unidad'],'cantidad':fmt(delta),'antes':fmt(q),'despues':fmt(after),'costoUnitario':fmt(applied),'importe':fmt(delta*applied),'tipo':kind,'referencia':reference,'observaciones':notes,'actor':actor['email'],'fecha':created,'ciclo':cycle,**(extra or {})}
@@ -116,10 +119,10 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
   with self.store.connect() as db:
    info=self.scope(actor,w,db);rows=[{'sku':sku,'unidad':unit,'cantidad':q,'costo':c,'valor':fmt(Decimal(q)*Decimal(c)),**json.loads(p)} for sku,unit,q,c,p in db.execute('SELECT sku,unit,qty,cost,payload FROM inv_balances WHERE warehouse=? ORDER BY sku',(w,))]
    known={r['sku']:r for r in rows};catalog={sku:{'sku':sku,'nombre':m['nombre'],'unidad':m['unidad'],'cantidad':None,'costo':None,'valor':None,'pendienteConteo':True} for sku,m in master.items()}
-   if info['activo']:catalog.update({sku:{**r,'pendienteConteo':False} for sku,r in known.items()})
+   if info['activo'] or known:catalog.update({sku:{**r,'pendienteConteo':not info['activo'],'provisional':not info['activo']} for sku,r in known.items()})
    for sku,r in known.items():
     if sku not in catalog:catalog[sku]={**r,'cantidad':None,'valor':None,'pendienteConteo':True}
-   rows=sorted(catalog.values(),key=lambda r:r['sku']);return {'almacen':info,'existencias':rows,'pendientesConteo':sum(r['pendienteConteo'] for r in rows),'valorTotal':fmt(sum((Decimal(r['valor']) for r in rows if r['valor'] is not None),Decimal(0))) if info['activo'] else None,'movimientos':[{'id':i,**json.loads(p)} for i,p in db.execute('SELECT id,payload FROM inv_ledger WHERE warehouse=? ORDER BY id DESC LIMIT 1000',(w,))],'solicitudes':[json.loads(p) for p, in db.execute('SELECT payload FROM inv_requests WHERE warehouse=? ORDER BY rowid DESC LIMIT 500',(w,))]}
+   rows=sorted(catalog.values(),key=lambda r:r['sku']);return {'almacen':info,'existencias':rows,'pendientesConteo':sum(r['pendienteConteo'] for r in rows),'valorTotal':fmt(sum((Decimal(r['valor']) for r in rows if r['valor'] is not None),Decimal(0))) if info['activo'] or known else None,'movimientos':[{'id':i,**json.loads(p)} for i,p in db.execute('SELECT id,payload FROM inv_ledger WHERE warehouse=? ORDER BY id DESC LIMIT 1000',(w,))],'solicitudes':[json.loads(p) for p, in db.execute('SELECT payload FROM inv_requests WHERE warehouse=? ORDER BY rowid DESC LIMIT 500',(w,))]}
  def public(self,value,actor):
   if actor['role'] in APPROVERS:return value
   if isinstance(value,dict):return {k:self.public(v,actor) for k,v in value.items() if not k.lower().startswith(('costo','precio','valor','importe','base'))}
@@ -184,7 +187,7 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
    except ValueError:unconverted+=1
   with self.store.connect() as db:
    info=self.scope(actor,w,db);balance=self.balance(db,w,sku);issued=sum((-Decimal(json.loads(p)['cantidad']) for p, in db.execute("SELECT payload FROM inv_ledger WHERE warehouse=? AND upper(sku)=? AND json_extract(payload,'$.tipo') IN ('REQUISICION_SURTIDO','REQUISICION_DEVOLUCION') AND json_extract(payload,'$.ciclo')=?",(w,sku,info['ciclo']))),Decimal(0))
-  return {'sku':sku,'unidad':m['unidad'],'comprasRecibidas':fmt(total),'sinEquivalencia':unconverted,'materialSurtido':fmt(issued),'disponible':balance['cantidad'] if info['activo'] and balance else None,'recepciones':receipts[:20]}
+  return {'sku':sku,'unidad':m['unidad'],'comprasRecibidas':fmt(total),'sinEquivalencia':unconverted,'materialSurtido':fmt(issued),'disponible':balance['cantidad'] if balance else None,'recepciones':receipts[:20]}
  def stamp(self,db,w):
   return fingerprint([list(db.execute('SELECT cycle,active,revision FROM inv_warehouses WHERE id=?',(w,)).fetchone()),[list(r) for r in db.execute('SELECT sku,unit,qty,cost FROM inv_balances WHERE warehouse=? ORDER BY sku',(w,))]])
  def repeat(self,db,data):
@@ -326,24 +329,38 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
    return self.remember(db,data,{'ok':True,'traspaso':doc})
  def receipt(self,db,doc,move,actor):
   w=str(doc['empresa'])+':'+doc['sucursal'];row=db.execute('SELECT active FROM inv_warehouses WHERE id=?',(w,)).fetchone()
-  if not row or not row[0]:return
+  if not row:
+   self.sync(db)
+   if not db.execute('SELECT 1 FROM inv_warehouses WHERE id=?',(w,)).fetchone():return
   for m in move['partidas']:
    line=next(l for l in doc['partidas'] if l['linea']==m['linea']);q=Decimal(m['cantidadEntrega']);cost=Decimal(line['precio'])/Decimal(line['factorEntrega']);self.post(db,w,{'sku':m['sku'],'nombre':m['nombre'],'unidad':m['unidadEntrega'],'materialId':m['materialId']},q,cost,'compra:'+move['id']+':'+m['linea'],'RECEPCION_COMPRA',actor,move['folio'],move.get('observaciones',''),{'pedidoId':doc['id'],'pedido':doc['folio'],'recibe':actor.get('name',actor['email'])})
+ def fulfillment_preview(self,db,doc,change,actor):
+  if change['tipo'] not in ('surtir','corregir_surtido'):return []
+  self.sync(db);prior=doc.get('inventario');w=prior.get('almacen') if prior else change.get('datos',{}).get('almacenInventario');warehouses=[r[0] for r in db.execute('SELECT id FROM inv_warehouses WHERE branch=?',(doc['sucursal'],))]
+  if not w:
+   if not warehouses:return []
+   if len(warehouses)!=1:raise ValueError('Selecciona la razón social/almacén para registrar el surtido.')
+   w=warehouses[0]
+  self.scope(actor,w,db,True);change['datos']['almacenInventario']=w;old={r['materialId']:r for r in doc['partidas']};shortages=[]
+  for r in change['datos']['partidas']:
+   line=old[r['materialId']];was=Decimal(line.get('cantidadSurtida','0')) if prior else Decimal(0);issue=Decimal(r['cantidadSurtida'])-was;balance=self.balance(db,w,line['sku'].upper());available=Decimal(balance['cantidad']) if balance else Decimal(0)
+   if issue>0 and available-issue<0:shortages.append({'sku':line['sku'],'unidad':line['unidad'],'disponible':fmt(available),'salida':fmt(issue),'saldoPropuesto':fmt(available-issue)})
+  return shortages
  def fulfillment(self,db,before,after,change,actor):
   if change['tipo'] not in ('surtir','corregir_surtido','cancelar'):return
   prior=before.get('inventario');w=prior.get('almacen') if prior else change.get('datos',{}).get('almacenInventario')
-  active=[r[0] for r in db.execute('SELECT id FROM inv_warehouses WHERE branch=? AND active=1',(before['sucursal'],))]
+  active=[r[0] for r in db.execute('SELECT id FROM inv_warehouses WHERE branch=?',(before['sucursal'],))]
   if not w:
    if not active:return
    if change['tipo']=='cancelar' and not prior:return
    if len(active)!=1:raise ValueError('Selecciona el almacén/razón social para descontar la requisición.')
    w=active[0]
   info=self.scope(actor,w,db,True)
-  if info['sucursal']!=before['sucursal'] or not info['activo']:raise ValueError('Almacén de surtido no disponible para esta sucursal.')
+  if info['sucursal']!=before['sucursal']:raise ValueError('Almacén de surtido no disponible para esta sucursal.')
   if prior and prior['ciclo']!=info['ciclo']:raise Conflict('El inventario fue restablecido. No se puede revertir un surtido de otro ciclo.')
   old={m['materialId']:m for m in before['partidas']};new={m['materialId']:m for m in after['partidas']};entries=copy.deepcopy(prior.get('partidas',{})) if prior else {}
   for id,m in new.items():
    was=Decimal(old[id].get('cantidadSurtida','0')) if prior else Decimal(0);actual=Decimal(0) if change['tipo']=='cancelar' else Decimal(m.get('cantidadSurtida','0'));delta=was-actual
    if delta:
-    source='req:'+after['id']+':'+str(before.get('revision',1))+':'+str(id);cost=Decimal(entries[str(id)]['costo']) if delta>0 and str(id) in entries else None;move=self.post(db,w,{'sku':m['sku'],'nombre':m['nombre'],'unidad':m['unidad'],'materialId':id},delta,cost,source,'REQUISICION_DEVOLUCION' if delta>0 else 'REQUISICION_SURTIDO',actor,before['numero'],change['motivo'],{'requisicionId':before['id'],'entrega':actor.get('name',actor['email']),'recibe':after['solicitante'],'area':after['area']});entries[str(id)]={'costo':move['costoUnitario']}
-  after['inventario']={'almacen':w,'ciclo':info['ciclo'],'partidas':entries,'fecha':now()}
+    source='req:'+after['id']+':'+str(before.get('revision',1))+':'+str(id);cost=Decimal(entries[str(id)]['costo']) if delta>0 and str(id) in entries else None;move=self.post(db,w,{'sku':m['sku'],'nombre':m['nombre'],'unidad':m['unidad'],'materialId':id},delta,cost,source,'REQUISICION_DEVOLUCION' if delta>0 else 'REQUISICION_SURTIDO',actor,before['numero'],change['motivo'],{'requisicionId':before['id'],'entrega':actor.get('name',actor['email']),'recibe':after['solicitante'],'area':after['area'],'saldoNegativoAutorizado':bool(change.get('inventarioNegativoAutorizado'))},allow_negative=bool(change.get('inventarioNegativoAutorizado')));entries[str(id)]={'costo':move['costoUnitario']}
+  after['inventario']={'almacen':w,'ciclo':info['ciclo'],'partidas':entries,'fecha':now(),'provisional':not info['activo'],'saldoNegativoAutorizado':bool(change.get('inventarioNegativoAutorizado'))}

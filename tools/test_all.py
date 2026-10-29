@@ -9,6 +9,7 @@ def run(path):
  return path.name,result.returncode,int(counts[-1]) if counts else 0,output
 
 if __name__=='__main__':
+ sys.stdout.reconfigure(encoding='utf8',errors='replace')
  paths=sorted((ROOT/'tests').glob('test_*.py'));failures=[];total=0
  with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
   for name,code,count,output in pool.map(run,paths):

@@ -82,6 +82,7 @@ def requester_document(document):
  result['partidas']=[{key:line[key] for key in ('materialId','sku','nombre','cantidad','cantidadSurtida','unidad','proveedor','observaciones') if key in line} for line in document.get('partidas',[])]
  for key,fields in [('aprobacion',('fecha','autorizadoPor','solicitadoPor')),('surtido',('fecha','registradoPor','observaciones'))]:
   if isinstance(document.get(key),dict):result[key]={field:document[key][field] for field in fields if field in document[key]}
+ if isinstance(document.get('inventario'),dict):result['inventario']={k:document['inventario'][k] for k in ('almacen','fecha','provisional') if k in document['inventario']}
  if isinstance(document.get('cancelacion'),dict):result['cancelacion']={key:document['cancelacion'][key] for key in ('motivo','fecha','autorizadoPor') if key in document['cancelacion']}
  return result
 

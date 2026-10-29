@@ -2,7 +2,7 @@ from plantillas_import import vendor_import
 """API del módulo de Compras de GMP ERP."""
 from pedidos_compra import PurchaseStore
 from pedidos_compra_vendors import HEADERS,import_vendors,smtp_config,save_smtp,send_order
-from pedidos_compra_output import order_pdf,report_rows,purchase_report_xlsx
+from pedidos_compra_output import order_pdf,report_rows,purchase_report_xlsx,purchase_report_pdf
 from comercial_print import report_xlsx,report_csv,report_pdf
 from requisiciones import ROOT
 
@@ -36,7 +36,7 @@ class PurchaseAPI:
    return order_pdf(doc,move),'application/pdf'
   if action in ('pedidos','reportes'):return po.orders(actor,company,q)
   if action=='reportes/excel':return purchase_report_xlsx(po.orders(actor,company,q)),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  if action=='reportes/pdf':return report_pdf(report_rows(po.orders(actor,company,q)),'GMP ERP · Reporte de compras'),'application/pdf'
+  if action=='reportes/pdf':return purchase_report_pdf(po.orders(actor,company,q)),'application/pdf'
   if action=='smtp':return smtp_config(po,actor)
   if action=='respaldo':return po.backup(actor)
   raise ValueError('Opción de Compras no encontrada.')

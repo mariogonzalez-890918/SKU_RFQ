@@ -106,8 +106,10 @@ class WorkflowStore:
    result=None
    old=self._document(db,c['objetivo'],actor);removed=c['tipo']=='modificar' and bool({r['materialId'] for r in old['partidas']}-{r['materialId'] for r in c['datos'].get('partidas',[])})
    c['requiereSistemas']=actor['role']=='auxti' and removed
-   if c['tipo']=='surtir' or actor['role'] in EDITORS or actor['role']=='auxti' and not removed:result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido aprobado y registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
-   if c['tipo']=='surtir':
+   shortages=self.inventory.fulfillment_preview(db,old,c,actor) if hasattr(self,'inventory') else []
+   if shortages:c.update({'inventarioInsuficiente':shortages,'alertaInventario':'Pedido con menos inventario: requiere aprobación para registrar saldo negativo.'})
+   if not shortages and (c['tipo']=='surtir' or actor['role'] in EDITORS or actor['role']=='auxti' and not removed):result=self._apply(db,c,actor);c.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Surtido aprobado y registrado por '+actor['role']+'.' if c['tipo']=='surtir' else 'Cambio autorizado por '+actor['role']+'.'})
+   if c['tipo']=='surtir' and result:
     for pending_id,payload in db.execute("SELECT id,payload FROM req_changes WHERE status='PENDIENTE' AND json_extract(payload,'$.objetivo')=? AND json_extract(payload,'$.tipo')='aprobar'",(c['objetivo'],)).fetchall():
      pending=json.loads(payload)
      if pending['revision']==c['revision']:
@@ -144,6 +146,9 @@ class WorkflowStore:
     elif c.get('perfilSolicitante')=='auxti':
      modules=db.execute("SELECT modules FROM role_modules WHERE role='auxti'").fetchone()
      if not user or not user[1] or user[0]!='auxti' or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('AUXTI perdió acceso al módulo. Rechaza la propuesta.')
+    elif c.get('perfilSolicitante') in EDITORS:
+     role=c['perfilSolicitante'];modules=db.execute('SELECT modules FROM role_modules WHERE role=?',(role,)).fetchone()
+     if not user or not user[1] or user[0]!=role or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('El solicitante perdió el acceso a requisiciones.')
     elif c.get('perfilSolicitante')=='requisicion':
      if not user or not user[1] or user[0]!='requisicion':raise Conflict('El solicitante ya no tiene activo el perfil Requisición. Rechaza la propuesta.')
      modules=db.execute("SELECT modules FROM role_modules WHERE role='requisicion'").fetchone();owner=db.execute('SELECT creator FROM req_documents WHERE id=?',(c['objetivo'],)).fetchone()
@@ -153,7 +158,15 @@ class WorkflowStore:
      if not user or not user[1] or user[0]!='almacenista':raise Conflict('El solicitante ya no es un almacenista activo. Rechaza la propuesta.')
      access=db.execute('SELECT almacenes FROM user_requisition_access WHERE email=?',(c['solicitadoPor'],)).fetchone();modules=db.execute('SELECT modules FROM role_modules WHERE role=?',('almacenista',)).fetchone()
      if not access or c['sucursal'] not in json.loads(access[0]) or not modules or 'requisiciones' not in json.loads(modules[0]):raise Conflict('El solicitante perdió acceso al almacén o módulo. Rechaza la propuesta.')
+    if c.get('inventarioInsuficiente'):
+     if data.get('autorizarNegativo') is not True:raise ValueError('Confirma la autorización del saldo negativo por inventario insuficiente.')
+     c['inventarioNegativoAutorizado']=True
     result=self._apply(db,c,actor)
+    if c['tipo']=='surtir':
+     for pending_id,payload in db.execute("SELECT id,payload FROM req_changes WHERE status='PENDIENTE' AND json_extract(payload,'$.objetivo')=? AND json_extract(payload,'$.tipo')='aprobar'",(c['objetivo'],)).fetchall():
+      pending=json.loads(payload)
+      if pending['revision']==c['revision']:
+       pending.update({'estado':'APROBADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':'Aprobación con surtido real registrado.'});db.execute('UPDATE req_changes SET status=?,payload=? WHERE id=?',('APROBADA',json.dumps(pending,ensure_ascii=False),pending_id))
    c.update({'estado':'APROBADA' if approved else 'RECHAZADA','resueltoPor':actor['email'],'resuelto':now(),'comentario':comment});db.execute('UPDATE req_changes SET status=?,payload=? WHERE id=?',(c['estado'],json.dumps(c,ensure_ascii=False),id))
   return {'cambio':c,'documento':result}
  def history(self,id,actor):
