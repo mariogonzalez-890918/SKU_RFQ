@@ -35,6 +35,12 @@ body.gmp-compact{--gmp-sidebar:80px}body.gmp-compact #gmpSidebar{padding-inline:
 
 #gmpMenuClose{position:absolute;top:10px;right:10px;width:32px;height:32px;min-height:32px;padding:0;border:1px solid #ffffff30;border-radius:8px;background:#ffffff0d;color:#fff;font-size:24px;line-height:1;display:grid;place-items:center;z-index:1}@media(max-width:1024px){#gmpSidebar .gmp-brand{margin-top:24px}body.gmp-menu-open{overflow:hidden}#gmpSidebar{overscroll-behavior:contain;touch-action:pan-y}#gmpMenuToggle{touch-action:manipulation}}
 .gmp-commercial-home{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:0 0 26px}.gmp-commercial-button{display:flex;align-items:center;gap:16px;min-height:105px;padding:23px 25px;border-radius:14px;background:#714b67;color:#fff!important;text-decoration:none;box-shadow:0 7px 20px #714b6724}.gmp-commercial-button:nth-child(2){background:#017e84}.gmp-commercial-button>span{display:flex;flex:1;flex-direction:column;gap:7px}.gmp-commercial-button strong{font-size:21px;line-height:1.2}.gmp-commercial-button small{font-size:12px;color:#ffffffd9}.gmp-commercial-button>.gmp-icon{width:29px;height:29px;flex-shrink:0}.gmp-commercial-button:hover{filter:brightness(1.08)}.gmp-commercial-button:focus-visible{outline:3px solid #b890a7;outline-offset:3px}#gmpModuleLinks .gmp-commercial-nav{display:block;padding:13px 16px;margin:4px 0;border-radius:8px;text-decoration:none;color:#eee0ed;background:#ffffff0b;font-size:13px}@media(max-width:700px){.gmp-commercial-home{grid-template-columns:1fr;gap:12px}.gmp-commercial-button{min-height:90px;padding:18px}.gmp-commercial-button strong{font-size:19px}}
+
+/* Los accesos externos usan la misma geometría que los botones del menú. */
+#gmpModuleLinks .gmp-commercial-nav{display:flex;align-items:center;gap:12px;min-height:47px;width:100%;min-width:0;box-sizing:border-box;padding:11px 13px;text-align:left;line-height:1.4}
+#gmpModuleLinks .gmp-commercial-nav .gmp-nav-text{min-width:0;white-space:normal;overflow-wrap:anywhere}
+@media(min-width:1025px){body.gmp-compact #gmpModuleLinks .gmp-commercial-nav{justify-content:center;min-height:47px;padding:13px;gap:0}body.gmp-compact #gmpModuleLinks .gmp-commercial-nav .gmp-nav-text{display:none}}
+#gmpSidebar{overflow-x:hidden}
 </style>
 <a class="gmp-skip" href="#gmpMain">Ir al contenido</a>
 <aside id="gmpSidebar" aria-label="Menú principal">

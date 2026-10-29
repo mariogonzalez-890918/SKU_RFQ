@@ -53,6 +53,7 @@ class InventoryAPI:
   if action=='operaciones':return self.ops.list(w,actor)
   if action=='pedidos-recibir':return inv.pending_receipts(w,actor)
   if action=='recepciones':return inv.receipts(w,q,actor)
+  if action=='recepciones/devolver':return self.ops.returnable(w,q.get('recepcion'),actor)
   if action=='disponibilidad':return inv.availability(w,q.get('sku'),actor)
   if action in ('kardex/xml','kardex/pdf','kardex/imprimir'):
    result=inv.public(inv.kardex(w,q,actor,True),actor)
@@ -82,6 +83,7 @@ class InventoryAPI:
   if action=='conceptos':return self.ops.save_concept(data,actor)
   if action=='movimiento':return self.ops.submit(data,actor)
   if action=='recepciones/cancelar':return self.ops.submit(data,actor,True)
+  if action=='recepciones/devolver':return self.ops.submit_return(data,actor)
   if action=='operaciones/autorizar':return self.ops.decide(data,actor)
   if action=='traspaso':return inv.transfer(data,actor)
   if action=='accesos':return inv.po.save_access(data,actor)

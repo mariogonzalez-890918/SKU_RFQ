@@ -10,7 +10,7 @@ from ventas import norm
 APPROVERS={'gerente','superadmin','auxti'}
 OPERATORS=APPROVERS|{'almacenista','compras'}
 HEADERS=['SKU','DESCRIPCION','UNIDAD_ENTREGA','FISICO']
-SYSTEM_CONCEPTS={'INICIAL':'Inventario inicial','AJUSTE':'Ajuste por conteo físico','RECEPCION_COMPRA':'Compra recibida','CANCELACION_RECEPCION_COMPRA':'Cancelación/devolución de compra recibida','REQUISICION_SURTIDO':'Surtido de requisición','REQUISICION_DEVOLUCION':'Reversión de surtido de requisición','TRASPASO_SALIDA':'Salida a otro almacén','TRASPASO_ENTRADA':'Recepción de otro almacén','TRASPASO_DEVOLUCION':'Devolución de traspaso','RESTABLECER':'Restablecimiento autorizado'}
+SYSTEM_CONCEPTS={'DEVOLUCION_PROVEEDOR':'Devolución al proveedor','INICIAL':'Inventario inicial','AJUSTE':'Ajuste por conteo físico','RECEPCION_COMPRA':'Compra recibida','CANCELACION_RECEPCION_COMPRA':'Cancelación/devolución de compra recibida','REQUISICION_SURTIDO':'Surtido de requisición','REQUISICION_DEVOLUCION':'Reversión de surtido de requisición','TRASPASO_SALIDA':'Salida a otro almacén','TRASPASO_ENTRADA':'Recepción de otro almacén','TRASPASO_DEVOLUCION':'Devolución de traspaso','RESTABLECER':'Restablecimiento autorizado'}
 
 def dec(value,positive=False):
  if isinstance(value,bool) or value is None or str(value).strip()=='':raise ValueError('Cantidad/costo requerido; una celda vacía no equivale a cero.')
@@ -125,7 +125,7 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
    rows=sorted(catalog.values(),key=lambda r:r['sku']);return {'almacen':info,'existencias':rows,'pendientesConteo':sum(r['pendienteConteo'] for r in rows),'valorTotal':fmt(sum((Decimal(r['valor']) for r in rows if r['valor'] is not None),Decimal(0))) if info['activo'] or known else None,'movimientos':[{'id':i,**json.loads(p)} for i,p in db.execute('SELECT id,payload FROM inv_ledger WHERE warehouse=? ORDER BY id DESC LIMIT 1000',(w,))],'solicitudes':[json.loads(p) for p, in db.execute('SELECT payload FROM inv_requests WHERE warehouse=? ORDER BY rowid DESC LIMIT 500',(w,))]}
  def public(self,value,actor):
   if actor['role'] in APPROVERS:return value
-  if isinstance(value,dict):return {k:self.public(v,actor) for k,v in value.items() if not k.lower().startswith(('costo','precio','valor','importe','base'))}
+  if isinstance(value,dict):return {k:self.public(v,actor) for k,v in value.items() if k.lower() not in ('total','impuestos') and not k.lower().startswith(('costo','precio','valor','importe','base'))}
   if isinstance(value,list):return [self.public(v,actor) for v in value]
   return value
  def kardex(self,w,filters,actor,export=False):
@@ -167,7 +167,7 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
     posted=bool(db.execute('SELECT 1 FROM inv_ledger WHERE source LIKE ? LIMIT 1',('compra:'+id+':%',)).fetchone())
     for line in move['partidas']:
      if sku and line['sku'].upper()!=sku:continue
-     qty=Decimal(line['cantidadEntrega']);result.append({'id':id,'pedido':order['folio'],'recepcion':move['folio'],'fecha':move['creado'],'proveedor':order['proveedor']['nombre'],'sku':line['sku'],'nombre':line['nombre'],'cantidadRecibida':line['cantidad'],'unidadCompra':line['unidad'],'cantidadEntrega':line['cantidadEntrega'],'unidadEntrega':line['unidadEntrega'],'materialId':line['materialId'],'registradoEnInventario':posted,'cancelada':bool(move.get('cancelacion')),'cancelacion':move.get('cancelacion'),'recibio':move['actor'],'costoUnitario':fmt(Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['precio'])/Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['factorEntrega']))})
+     returned=sum((Decimal(l['cantidad']) for d in move.get('devoluciones',[]) for l in d['partidas'] if l['linea']==line['linea']),Decimal(0));returned_delivery=sum((Decimal(l['cantidadEntrega']) for d in move.get('devoluciones',[]) for l in d['partidas'] if l['linea']==line['linea']),Decimal(0));qty=Decimal(line['cantidadEntrega']);result.append({'id':id,'linea':line['linea'],'cantidadDevuelta':fmt(returned),'cantidadDevueltaEntrega':fmt(returned_delivery),'cantidadNetaEntrega':fmt(qty-returned_delivery),'pendienteDevolver':fmt(Decimal(line['cantidad'])-returned),'devoluciones':[{k:d[k] for k in ('folio','fecha','actor','solicitadoPor','observaciones')} for d in move.get('devoluciones',[])],'pedido':order['folio'],'recepcion':move['folio'],'fecha':move['creado'],'proveedor':order['proveedor']['nombre'],'sku':line['sku'],'nombre':line['nombre'],'cantidadRecibida':line['cantidad'],'unidadCompra':line['unidad'],'cantidadEntrega':line['cantidadEntrega'],'unidadEntrega':line['unidadEntrega'],'materialId':line['materialId'],'registradoEnInventario':posted,'cancelada':bool(move.get('cancelacion')),'cancelacion':move.get('cancelacion'),'recibio':move['actor'],'costoUnitario':fmt(Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['precio'])/Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['factorEntrega']))})
   return {'recepciones':result}
  def pending_receipts(self,w,actor):
   info=self.scope(actor,w);result=[]
@@ -183,7 +183,7 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
   receipts=self.receipts(w,{'sku':sku},actor)['recepciones'];total=Decimal(0);unconverted=0
   for r in receipts:
    if r.get('cancelada'):continue
-   try:total+=delivery_in(Decimal(r['cantidadEntrega']),r['unidadEntrega'],m['unidad'])
+   try:total+=delivery_in(Decimal(r.get('cantidadNetaEntrega',r['cantidadEntrega'])),r['unidadEntrega'],m['unidad'])
    except ValueError:unconverted+=1
   with self.store.connect() as db:
    info=self.scope(actor,w,db);balance=self.balance(db,w,sku);issued=sum((-Decimal(json.loads(p)['cantidad']) for p, in db.execute("SELECT payload FROM inv_ledger WHERE warehouse=? AND upper(sku)=? AND json_extract(payload,'$.tipo') IN ('REQUISICION_SURTIDO','REQUISICION_DEVOLUCION') AND json_extract(payload,'$.ciclo')=?",(w,sku,info['ciclo']))),Decimal(0))

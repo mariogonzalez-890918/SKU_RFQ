@@ -67,3 +67,7 @@ Resumen de existencias tiene su propia pestaña, con los filtros de fechas, SKU 
 ### Traspasos 3.1.5
 
 Agregar partida admite físico cero, negativo o pendiente. La solicitud no mueve inventario. Ya no se exige inventario inicial activo para enviar o recibir; los saldos previos al conteo son provisionales. Si el envío deja negativo, únicamente Gerencia, AUXTI o Superadministrador pueden confirmarlo marcando la autorización expresa. Almacenista no puede forzar este permiso. La recepción confirma lo realmente recibido y aumenta destino, incluso si aún conserva saldo negativo. El concepto tiene columna propia en Kárdex y PDF/impresión. Costos exclusivos de los tres autorizadores.
+
+### Devolución al proveedor 3.1.6
+
+Desde Recepciones de compra, Devolver al proveedor permite devolución parcial por partida o completa del remanente. Se excluyen cantidades ya devueltas y recepciones canceladas. Una solicitud de Almacenista no cambia stock hasta autorizarla Gerencia, AUXTI o Superadministrador. La aprobación revalida el remanente para evitar devolver dos veces en propuestas concurrentes. Se genera folio DVP, documento vinculado al pedido/recepción y salida de Kárdex. Conserva la recepción y las compras/facturas originales; la devolución física no constituye una cancelación de factura ni una nota de crédito. Se registran recibidos brutos, devueltos y recibidos netos por separado. No se cancela una recepción que ya tenga devoluciones: se devuelve el remanente. Costos de inventario ocultos para Almacenista en todas las salidas.

@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.5
+# GMP ERP · Versión 3.1.6
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -8,7 +8,11 @@ Aplicación para Windows y servidor local con generadores de SKU de compras y ve
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
 
-## Cambios 3.1.5
+## Cambios 3.1.6
+
+La barra lateral contraída muestra solo iconos, con nombre accesible y tooltip; se corrige el texto recortado de Almacenes, Pedidos, Expendios y Compras. Desplegada conserva nombres completos, incluidos celular y tablet.
+
+Recepciones de compra incluye devolución al proveedor parcial o completa del remanente. Valida cantidades contra la recepción y devoluciones anteriores, conserva el original y registra la salida en Kárdex. Almacenista solicita; Gerencia, AUXTI y Superadministrador autorizan. Se muestran cantidades recibidas, devueltas y netas; las compras/facturas originales se conservan y la devolución física se registra por separado. El reporte Excel incluye devuelto y recibido neto.
 
 Traspasos permite armar solicitudes aunque falte conteo o el físico sea cero/negativo. Enviar sin suficiente stock requiere autorización explícita de Gerencia, AUXTI o Superadministrador; no se exige activar el inventario inicial. El destino aumenta solo al confirmar cantidades recibidas. Kárdex tiene columna propia Concepto de movimiento y mantiene costos ocultos para Almacenista en pantalla y exportaciones.
 

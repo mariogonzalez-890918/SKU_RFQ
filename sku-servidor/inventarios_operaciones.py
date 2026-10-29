@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
     doc=inv.po.document(db,row[0],actor);move=json.loads(row[1])
     if doc['empresa']!=info['empresa'] or doc['sucursal']!=info['sucursal']:raise PermissionError('La recepción pertenece a otro almacén.')
     if move.get('cancelacion'):raise Conflict('La recepción ya fue cancelada/devolucionada.')
+    if move.get('devoluciones'):raise Conflict('La recepción ya tiene devoluciones. Devuelve únicamente el remanente desde Devolver al proveedor.')
     if data.get('devolucionFisica') is not True:raise ValueError('Confirma la devolución física del material para descontarlo.')
     req.update({'recepcion':data['recepcion'],'folio':move['folio'],'pedido':doc['folio'],'devolucionFisica':True,'partidas':[{k:l[k] for k in ('sku','nombre','cantidad','unidad','cantidadEntrega','unidadEntrega')} for l in move['partidas']]})
    else:
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
   inv=self.inv;info=inv.scope(actor,req['almacen'],db,True)
   if req['ciclo']!=info['ciclo']:raise Conflict('El almacén fue restablecido. Rechaza la operación y crea una nueva.')
   if req['tipo']=='CANCELAR_RECEPCION_COMPRA':return self.cancel_receipt(db,req,actor,info)
+  if req['tipo']=='DEVOLUCION_PROVEEDOR':return self.apply_return(db,req,actor,info)
   m=req['material'];q=Decimal(req['cantidad']);concept=db.execute('SELECT active FROM inv_concepts WHERE code=?',(req['conceptoId'],)).fetchone()
   if not concept or not concept[0]:raise Conflict('El concepto fue desactivado; rechaza y solicita una nueva operación.')
   move=inv.post(db,info['id'],m,q if req['tipo']=='ENTRADA' else -q,Decimal(m['costo']) if req['tipo']=='ENTRADA' else None,'operacion:'+req['id'],req['tipo'],actor,req['referencia'],req['motivo'],{'conceptoId':req['conceptoId'],'concepto':req['concepto'],'solicitadoPor':req['solicitadoPor']},allow_negative=bool(req.get('inventarioNegativoAutorizado')));return {'movimiento':move}
@@ -81,6 +83,7 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
   if not row:raise ValueError('La recepción ya no está disponible.')
   move=json.loads(row[1]);doc=inv.po.document(db,row[0],actor)
   if move.get('cancelacion'):raise Conflict('La recepción ya fue cancelada.')
+  if move.get('devoluciones'):raise Conflict('La recepción ya tiene devoluciones. Devuelve únicamente el remanente desde Devolver al proveedor.')
   for l in move['partidas']:
    line=next(r for r in doc['partidas'] if r['linea']==l['linea']);remaining=Decimal(line['recibido'])-Decimal(l['cantidad'])
    if remaining<Decimal(line['comprado']):raise ValueError('La recepción tiene compras/facturas asociadas. Regulariza primero su devolución o nota de crédito; no se puede cancelar dejando compras sin recepción.')
@@ -102,6 +105,51 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
     if data.get('autorizarNegativo') is not True:raise ValueError('Confirma la autorización del saldo negativo.')
     req['inventarioNegativoAutorizado']=True
    result=self.apply(db,req,actor) if data['aprobar'] else None;req.update({'estado':'APROBADA' if data['aprobar'] else 'RECHAZADA','autorizadoPor':actor['email'],'resuelto':now(),'comentario':comment});db.execute('UPDATE inv_operations SET state=?,payload=? WHERE id=?',(req['estado'],dumps(req),req['id']));return {'ok':True,'solicitud':req,**(result or {})}
+
+ def return_source(self,db,w,id,actor):
+  inv=self.inv;info=inv.scope(actor,w,db,True);row=db.execute("SELECT order_id,payload FROM po_moves WHERE id=? AND kind='RECEPCION'",(id,)).fetchone()
+  if not row:raise ValueError('Recepción de compra no encontrada.')
+  move=json.loads(row[1]);doc=inv.po.document(db,row[0],actor)
+  if doc['empresa']!=info['empresa'] or doc['sucursal']!=info['sucursal']:raise PermissionError('La recepción pertenece a otro almacén.')
+  if move.get('cancelacion'):raise Conflict('La recepción está cancelada.')
+  lines=[]
+  for line in move['partidas']:
+   returned=sum((Decimal(l['cantidad']) for r in move.get('devoluciones',[]) for l in r['partidas'] if l['linea']==line['linea']),Decimal(0));remaining=Decimal(line['cantidad'])-returned;lines.append({**line,'devuelto':fmt(returned),'pendienteDevolver':fmt(remaining)})
+  return info,move,doc,lines
+ def returnable(self,w,id,actor):
+  with self.inv.store.connect() as db:
+   info,move,doc,lines=self.return_source(db,w,id,actor);return {'recepcion':move['id'],'folio':move['folio'],'pedido':doc['folio'],'proveedor':doc['proveedor']['nombre'],'partidas':lines,'devoluciones':move.get('devoluciones',[])}
+ def submit_return(self,data,actor):
+  from pedidos_compra import delivery_in
+  inv=self.inv;inv.scope(actor)
+  with inv.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE');repeat=inv.repeat(db,data)
+   if repeat:return repeat
+   info,move,doc,source=self.return_source(db,data.get('almacen'),data.get('recepcion'),actor);mode=data.get('modo');requested=[{'linea':l['linea'],'cantidad':l['pendienteDevolver']} for l in source if Decimal(l['pendienteDevolver'])>0] if mode=='TOTAL' else data.get('partidas');lines=[];seen=set();needed={}
+   if mode not in ('TOTAL','PARCIAL') or not isinstance(requested,list) or not requested:raise ValueError('Selecciona devolución parcial con cantidades o completa pendiente.')
+   for r in requested:
+    line=next((l for l in source if l['linea']==r.get('linea')),None);q=dec(r.get('cantidad'),True)
+    if not line or line['linea'] in seen or q>Decimal(line['pendienteDevolver']):raise ValueError('Cantidad mayor al pendiente de devolver, partida repetida o inválida.')
+    seen.add(line['linea']);entry={k:line[k] for k in ('linea','materialId','sku','nombre','unidad','unidadEntrega')};entry.update({'cantidad':fmt(q),'cantidadEntrega':fmt(q*Decimal(line['cantidadEntrega'])/Decimal(line['cantidad']))});lines.append(entry);balance=inv.balance(db,info['id'],line['sku'].upper());unit=balance['unidad'] if balance else line['unidadEntrega'];needed[line['sku']]=needed.get(line['sku'],Decimal(0))+delivery_in(Decimal(entry['cantidadEntrega']),line['unidadEntrega'],unit)
+   deficits=[]
+   for sku,q in needed.items():
+    balance=inv.balance(db,info['id'],sku.upper());available=Decimal(balance['cantidad']) if balance else Decimal(0)
+    if q>available:deficits.append({'sku':sku,'disponible':fmt(available),'salida':fmt(q),'saldoPropuesto':fmt(available-q)})
+   req={'id':uuid.uuid4().hex,'almacen':info['id'],'ciclo':info['ciclo'],'estado':'PENDIENTE','fecha':now(),'solicitadoPor':actor['email'],'motivo':text(data.get('motivo',''),2000),'tipo':'DEVOLUCION_PROVEEDOR','recepcion':move['id'],'folio':move['folio'],'pedido':doc['folio'],'modo':mode,'partidas':lines}
+   if deficits:req['inventarioInsuficiente']=deficits
+   if deficits and actor['role'] in APPROVERS and data.get('autorizarNegativo') is True:req['inventarioNegativoAutorizado']=True
+   result=None
+   if actor['role'] in APPROVERS and (not deficits or req.get('inventarioNegativoAutorizado')):result=self.apply_return(db,req,actor,info);req.update({'estado':'APROBADA','autorizadoPor':actor['email'],'resuelto':now(),'comentario':req['motivo']})
+   db.execute('INSERT INTO inv_operations VALUES(?,?,?,?)',(req['id'],info['id'],req['estado'],dumps(req)));return inv.remember(db,data,{'ok':True,'solicitud':req,**(result or {})})
+ def apply_return(self,db,req,actor,info):
+  from pedidos_compra import delivery_in
+  from comercial import money
+  inv=self.inv;info,source,doc,remaining=self.return_source(db,info['id'],req['recepcion'],actor);id=req['id'];number=db.execute("SELECT COUNT(*)+1 FROM po_moves WHERE kind='DEVOLUCION' OR kind='DEVOLUCION_PROVEEDOR'").fetchone()[0];folio='DVP-'+str(number).zfill(6);parts=[]
+  for l in req['partidas']:
+   old=next((r for r in remaining if r['linea']==l['linea']),None)
+   if not old or Decimal(l['cantidad'])>Decimal(old['pendienteDevolver']):raise Conflict('Otra devolución modificó el remanente. Rechaza esta propuesta y carga las cantidades actuales.')
+   line=next(r for r in doc['partidas'] if r['linea']==l['linea']);balance=inv.balance(db,info['id'],l['sku'].upper());unit=balance['unidad'] if balance else l['unidadEntrega'];q=delivery_in(Decimal(l['cantidadEntrega']),l['unidadEntrega'],unit);inv.post(db,info['id'],{'sku':l['sku'],'nombre':l['nombre'],'unidad':unit,'materialId':l['materialId']},-q,None,'devprov:'+id+':'+l['linea'],'DEVOLUCION_PROVEEDOR',actor,folio,req['motivo'],{'pedidoId':doc['id'],'pedido':doc['folio'],'recepcionId':source['id'],'recepcion':source['folio'],'solicitadoPor':req['solicitadoPor'],'concepto':'Devolución al proveedor','entrega':req['solicitadoPor'],'recibe':doc['proveedor']['nombre']},allow_negative=bool(req.get('inventarioNegativoAutorizado')));line['devueltoProveedor']=fmt(Decimal(line.get('devueltoProveedor','0'))+Decimal(l['cantidad']));line['recibidoNeto']=fmt(Decimal(line['recibido'])-Decimal(line['devueltoProveedor']));parts.append({**l,'base':money(Decimal(l['cantidad'])*Decimal(line['precio'])),'impuestos':money(Decimal(l['cantidad'])*Decimal(line['precio'])*Decimal(line['impuesto'])/100)})
+  value={'id':id,'pedidoId':doc['id'],'empresa':doc['empresa'],'proveedorId':doc['proveedor']['id'],'tipo':'DEVOLUCION_PROVEEDOR','folio':folio,'fecha':now()[:10],'creado':now(),'actor':actor['email'],'referencia':source['folio'],'observaciones':req['motivo'],'partidas':parts,'total':money(sum((Decimal(l['base'])+Decimal(l['impuestos']) for l in parts),Decimal(0))),'recepcionId':source['id'],'autorizadoPor':actor['email'],'solicitadoPor':req['solicitadoPor']};source.setdefault('devoluciones',[]).append(value);db.execute('UPDATE po_moves SET payload=? WHERE id=?',(dumps(source),source['id']));db.execute('INSERT INTO po_moves VALUES(?,?,?,?,?)',(id,doc['id'],'DEVOLUCION_PROVEEDOR','devprov:'+id,dumps(value)));inv.po.update_doc(db,doc,actor,'DEVOLUCION_PROVEEDOR');return {'devolucion':value,'folioDevolucion':folio}
 
  def missing_issues(self,w,actor):
   if actor['role'] not in APPROVERS:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador concilian movimientos de almacén.')
