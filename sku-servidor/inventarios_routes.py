@@ -3,6 +3,7 @@ from inventarios import InventoryStore,HEADERS,APPROVERS
 from comercial_print import report_xlsx,report_pdf
 from fechas import display_date
 from inventarios_operaciones import InventoryOperations
+from inventarios_documentos import InventoryDocuments
 
 def kardex_export(result,filters,action,costs):
  import html,io,xml.etree.ElementTree as ET
@@ -36,7 +37,7 @@ def kardex_export(result,filters,action,costs):
  SimpleDocTemplate(out,pagesize=page,leftMargin=20,rightMargin=20,topMargin=24,bottomMargin=24).build(story);return out.getvalue(),'application/pdf'
 
 class InventoryAPI:
- def __init__(self,store,po):self.inv=InventoryStore(store,po);self.ops=InventoryOperations(self.inv)
+ def __init__(self,store,po):self.inv=InventoryStore(store,po);self.ops=InventoryOperations(self.inv);self.docs=InventoryDocuments(self.inv)
  def get(self,path,query,actor):
   result=self._get(path,query,actor)
   return self.inv.public(result,actor) if isinstance(result,dict) else result
@@ -51,6 +52,11 @@ class InventoryAPI:
   if action=='conceptos':return self.ops.concepts(actor)
   if action=='requisiciones-sin-salida':return self.ops.missing_issues(w,actor)
   if action=='operaciones':return self.ops.list(w,actor)
+  if action=='negativos':return self.docs.negatives(w,actor)
+  if action=='entregas-compras':return self.docs.handoffs(w,q,actor)
+  if action=='reportes/entregas-compras/pdf':return self.docs.handoff_pdf(w,q,actor)
+  if action=='recepciones/pdf':return self.docs.receipts_pdf(w,q,actor)
+  if action=='traspaso/pdf':return self.docs.transfer_pdf(q.get('id'),q,actor)
   if action=='pedidos-recibir':return inv.pending_receipts(w,actor)
   if action=='recepciones':return inv.receipts(w,q,actor)
   if action=='recepciones/devolver':return self.ops.returnable(w,q.get('recepcion'),actor)
@@ -86,5 +92,7 @@ class InventoryAPI:
   if action=='recepciones/devolver':return self.ops.submit_return(data,actor)
   if action=='operaciones/autorizar':return self.ops.decide(data,actor)
   if action=='traspaso':return inv.transfer(data,actor)
+  if action=='traspaso/cancelar':return self.ops.submit_transfer_cancel(data,actor)
+  if action=='entregar-compras':return self.docs.handoff(data,actor)
   if action=='accesos':return inv.po.save_access(data,actor)
   raise ValueError('Acción de Inventarios inválida.')

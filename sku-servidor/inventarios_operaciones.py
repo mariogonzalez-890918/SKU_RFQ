@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
   with self.inv.store.connect() as db:return {'operaciones':[json.loads(p) for p, in db.execute('SELECT payload FROM inv_operations WHERE warehouse=? ORDER BY rowid DESC LIMIT 500',(w,))]}
  def submit(self,data,actor,cancel=False):
   inv=self.inv;inv.scope(actor);w=data.get('almacen');reason=text(data.get('motivo',''),2000)
-  if not reason:raise ValueError('Escribe el motivo de la operación.')
+  if not reason and not cancel:raise ValueError('Escribe el motivo de la operación.')
   if not cancel and actor['role'] not in APPROVERS:raise PermissionError('Movimiento de almacén es exclusivo de Gerencia, AUXTI y Superadministrador.')
   materials=inv.materials() if not cancel else None
   with inv.store.connect() as db:
@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
     if move.get('cancelacion'):raise Conflict('La recepción ya fue cancelada/devolucionada.')
     if move.get('devoluciones'):raise Conflict('La recepción ya tiene devoluciones. Devuelve únicamente el remanente desde Devolver al proveedor.')
     if data.get('devolucionFisica') is not True:raise ValueError('Confirma la devolución física del material para descontarlo.')
-    req.update({'recepcion':data['recepcion'],'folio':move['folio'],'pedido':doc['folio'],'devolucionFisica':True,'partidas':[{k:l[k] for k in ('sku','nombre','cantidad','unidad','cantidadEntrega','unidadEntrega')} for l in move['partidas']]})
+    _,_,_,source=self.return_source(db,w,data['recepcion'],actor);mode=data.get('modo','TOTAL');requested=[{'linea':l['linea'],'cantidad':l['pendienteDevolver']} for l in source if Decimal(l['pendienteDevolver'])>0] if mode=='TOTAL' else data.get('partidas')
+    if mode not in ('TOTAL','PARCIAL'):raise ValueError('Selecciona cancelación total o parcial.')
+    parts=self.select_receipt_parts(source,requested);req.update({'recepcion':data['recepcion'],'folio':move['folio'],'pedido':doc['folio'],'devolucionFisica':True,'modo':mode,'partidas':parts})
    else:
     m=materials.get(str(data.get('sku','')).upper());qty=dec(data.get('cantidad'),True);kind=data.get('tipo');code=data.get('concepto') or ('ENTRADA_OTROS' if kind=='ENTRADA' else 'SALIDA_OTROS');concept=db.execute('SELECT kind,name,active FROM inv_concepts WHERE code=?',(code,)).fetchone()
     # Las operaciones pueden preceder al conteo inicial; negativos requieren autorización.
@@ -59,7 +61,7 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
    if cancel:
     from pedidos_compra import delivery_in
     deficits=[]
-    for l in move['partidas']:
+    for l in req['partidas']:
      balance=inv.balance(db,w,l['sku'].upper());available=Decimal(balance['cantidad']) if balance else Decimal(0);quantity=delivery_in(Decimal(l['cantidadEntrega']),l['unidadEntrega'],balance['unidad'] if balance else l['unidadEntrega'])
      if quantity>available:deficits.append({'sku':l['sku'],'disponible':fmt(available),'salida':fmt(quantity),'saldoPropuesto':fmt(available-quantity)})
     if deficits:req['inventarioInsuficiente']=deficits
@@ -74,6 +76,7 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
   if req['ciclo']!=info['ciclo']:raise Conflict('El almacén fue restablecido. Rechaza la operación y crea una nueva.')
   if req['tipo']=='CANCELAR_RECEPCION_COMPRA':return self.cancel_receipt(db,req,actor,info)
   if req['tipo']=='DEVOLUCION_PROVEEDOR':return self.apply_return(db,req,actor,info)
+  if req['tipo']=='CANCELAR_TRASPASO':return self.apply_transfer_cancel(db,req,actor)
   m=req['material'];q=Decimal(req['cantidad']);concept=db.execute('SELECT active FROM inv_concepts WHERE code=?',(req['conceptoId'],)).fetchone()
   if not concept or not concept[0]:raise Conflict('El concepto fue desactivado; rechaza y solicita una nueva operación.')
   move=inv.post(db,info['id'],m,q if req['tipo']=='ENTRADA' else -q,Decimal(m['costo']) if req['tipo']=='ENTRADA' else None,'operacion:'+req['id'],req['tipo'],actor,req['referencia'],req['motivo'],{'conceptoId':req['conceptoId'],'concepto':req['concepto'],'solicitadoPor':req['solicitadoPor']},allow_negative=bool(req.get('inventarioNegativoAutorizado')));return {'movimiento':move}
@@ -84,12 +87,18 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
   move=json.loads(row[1]);doc=inv.po.document(db,row[0],actor)
   if move.get('cancelacion'):raise Conflict('La recepción ya fue cancelada.')
   if move.get('devoluciones'):raise Conflict('La recepción ya tiene devoluciones. Devuelve únicamente el remanente desde Devolver al proveedor.')
-  for l in move['partidas']:
-   line=next(r for r in doc['partidas'] if r['linea']==l['linea']);remaining=Decimal(line['recibido'])-Decimal(l['cantidad'])
+  _,_,_,source=self.return_source(db,info['id'],move['id'],actor);parts=[]
+  for entry in req['partidas']:
+   l=next((r for r in source if r['linea']==entry.get('linea') or 'linea' not in entry and r['sku']==entry['sku'] and r['unidad']==entry['unidad']),None)
+   if not l or Decimal(entry['cantidad'])>Decimal(l['pendienteDevolver']):raise Conflict('Otra operación modificó la recepción. Revisa el remanente antes de cancelar.')
+   q=Decimal(entry['cantidad']);entry={**l,**entry,'linea':l['linea']};line=next(r for r in doc['partidas'] if r['linea']==l['linea']);remaining=Decimal(line['recibido'])-q
    if remaining<Decimal(line['comprado']):raise ValueError('La recepción tiene compras/facturas asociadas. Regulariza primero su devolución o nota de crédito; no se puede cancelar dejando compras sin recepción.')
-   balance=inv.balance(db,info['id'],l['sku'].upper());delivery_unit=balance['unidad'] if balance else l['unidadEntrega'];qty=delivery_in(Decimal(l['cantidadEntrega']),l['unidadEntrega'],delivery_unit);inv.post(db,info['id'],{'sku':l['sku'],'nombre':l['nombre'],'unidad':delivery_unit,'materialId':l['materialId']},-qty,None,'cancelcompra:'+move['id']+':'+l['linea'],'CANCELACION_RECEPCION_COMPRA',actor,move['folio'],req['motivo'],{'pedido':doc['folio'],'pedidoId':doc['id'],'solicitadoPor':req['solicitadoPor'],'concepto':'Cancelación/devolución de recepción de compra'},allow_negative=bool(req.get('inventarioNegativoAutorizado')))
-   line['recibido']=fmt(remaining)
-  move['cancelacion']={'fecha':now(),'motivo':req['motivo'],'autorizadoPor':actor['email'],'solicitadoPor':req['solicitadoPor'],'devolucionFisica':True,'almacen':info['id']};db.execute('UPDATE po_moves SET payload=? WHERE id=?',(dumps(move),move['id']));doc['estado']='PEDIDO' if not any(Decimal(l['recibido']) for l in doc['partidas']) else 'RECIBIDO' if all(Decimal(l['recibido'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'RECEPCION_PARCIAL';inv.po.update_doc(db,doc,actor,'CANCELACION_RECEPCION');return {'recepcion':move['id'],'folio':move['folio']}
+   balance=inv.balance(db,info['id'],l['sku'].upper());delivery_unit=balance['unidad'] if balance else l['unidadEntrega'];qty=delivery_in(Decimal(entry['cantidadEntrega']),l['unidadEntrega'],delivery_unit);inv.post(db,info['id'],{'sku':l['sku'],'nombre':l['nombre'],'unidad':delivery_unit,'materialId':l['materialId']},-qty,None,'cancelcompra:'+req['id']+':'+l['linea'],'CANCELACION_RECEPCION_COMPRA',actor,move['folio'],req['motivo'],{'pedido':doc['folio'],'pedidoId':doc['id'],'solicitadoPor':req['solicitadoPor'],'concepto':'Cancelación parcial/total de recepción de compra'},allow_negative=bool(req.get('inventarioNegativoAutorizado')));line['recibido']=fmt(remaining);line['recibidoNeto']=fmt(remaining-Decimal(line.get('devueltoProveedor','0')));parts.append({k:entry[k] for k in ('linea','sku','nombre','unidad','cantidad','cantidadEntrega','unidadEntrega')})
+  cancellation={'id':req['id'],'fecha':now(),'motivo':req['motivo'],'autorizadoPor':actor['email'],'solicitadoPor':req['solicitadoPor'],'devolucionFisica':True,'almacen':info['id'],'partidas':parts};move.setdefault('cancelacionesParciales',[]).append(cancellation)
+  all_cancelled=all(sum((Decimal(l['cantidad']) for c in move['cancelacionesParciales'] for l in c['partidas'] if l['linea']==r['linea']),Decimal(0))==Decimal(r['cantidad']) for r in move['partidas'])
+  if all_cancelled:move['cancelacion']=cancellation
+  db.execute('UPDATE po_moves SET payload=? WHERE id=?',(dumps(move),move['id']));doc['estado']='COMPRADO' if all(Decimal(l['comprado'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'PEDIDO' if not any(Decimal(l['recibido']) for l in doc['partidas']) else 'RECIBIDO' if all(Decimal(l['recibido'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'RECEPCION_PARCIAL';inv.po.update_doc(db,doc,actor,'CANCELACION_RECEPCION');return {'recepcion':move['id'],'folio':move['folio'],'cancelacionParcial':not all_cancelled}
+
  def decide(self,data,actor):
   inv=self.inv;inv.scope(actor)
   if actor['role'] not in APPROVERS:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador autorizan operaciones.')
@@ -114,8 +123,17 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
   if move.get('cancelacion'):raise Conflict('La recepción está cancelada.')
   lines=[]
   for line in move['partidas']:
-   returned=sum((Decimal(l['cantidad']) for r in move.get('devoluciones',[]) for l in r['partidas'] if l['linea']==line['linea']),Decimal(0));remaining=Decimal(line['cantidad'])-returned;lines.append({**line,'devuelto':fmt(returned),'pendienteDevolver':fmt(remaining)})
+   returned=sum((Decimal(l['cantidad']) for r in move.get('devoluciones',[]) for l in r['partidas'] if l['linea']==line['linea']),Decimal(0));cancelled=sum((Decimal(l['cantidad']) for c in move.get('cancelacionesParciales',[]) for l in c['partidas'] if l['linea']==line['linea']),Decimal(0));remaining=Decimal(line['cantidad'])-returned-cancelled;lines.append({**line,'devuelto':fmt(returned),'cancelado':fmt(cancelled),'pendienteDevolver':fmt(remaining)})
   return info,move,doc,lines
+ def select_receipt_parts(self,source,requested):
+  if not isinstance(requested,list) or not requested:raise ValueError('Selecciona al menos una partida con cantidad positiva.')
+  parts=[];seen=set()
+  for r in requested:
+   l=next((l for l in source if l['linea']==r.get('linea')),None);q=dec(r.get('cantidad'),True)
+   if not l or l['linea'] in seen or q>Decimal(l['pendienteDevolver']):raise ValueError('Cantidad superior al remanente o partida repetida.')
+   seen.add(l['linea']);parts.append({**{k:l[k] for k in ('linea','materialId','sku','nombre','unidad','unidadEntrega')},'cantidad':fmt(q),'cantidadEntrega':fmt(q*Decimal(l['cantidadEntrega'])/Decimal(l['cantidad']))})
+  return parts
+
  def returnable(self,w,id,actor):
   with self.inv.store.connect() as db:
    info,move,doc,lines=self.return_source(db,w,id,actor);return {'recepcion':move['id'],'folio':move['folio'],'pedido':doc['folio'],'proveedor':doc['proveedor']['nombre'],'partidas':lines,'devoluciones':move.get('devoluciones',[])}
@@ -150,6 +168,24 @@ CREATE TABLE IF NOT EXISTS inv_operations(id TEXT PRIMARY KEY,warehouse TEXT NOT
    if not old or Decimal(l['cantidad'])>Decimal(old['pendienteDevolver']):raise Conflict('Otra devolución modificó el remanente. Rechaza esta propuesta y carga las cantidades actuales.')
    line=next(r for r in doc['partidas'] if r['linea']==l['linea']);balance=inv.balance(db,info['id'],l['sku'].upper());unit=balance['unidad'] if balance else l['unidadEntrega'];q=delivery_in(Decimal(l['cantidadEntrega']),l['unidadEntrega'],unit);inv.post(db,info['id'],{'sku':l['sku'],'nombre':l['nombre'],'unidad':unit,'materialId':l['materialId']},-q,None,'devprov:'+id+':'+l['linea'],'DEVOLUCION_PROVEEDOR',actor,folio,req['motivo'],{'pedidoId':doc['id'],'pedido':doc['folio'],'recepcionId':source['id'],'recepcion':source['folio'],'solicitadoPor':req['solicitadoPor'],'concepto':'Devolución al proveedor','entrega':req['solicitadoPor'],'recibe':doc['proveedor']['nombre']},allow_negative=bool(req.get('inventarioNegativoAutorizado')));line['devueltoProveedor']=fmt(Decimal(line.get('devueltoProveedor','0'))+Decimal(l['cantidad']));line['recibidoNeto']=fmt(Decimal(line['recibido'])-Decimal(line['devueltoProveedor']));parts.append({**l,'base':money(Decimal(l['cantidad'])*Decimal(line['precio'])),'impuestos':money(Decimal(l['cantidad'])*Decimal(line['precio'])*Decimal(line['impuesto'])/100)})
   value={'id':id,'pedidoId':doc['id'],'empresa':doc['empresa'],'proveedorId':doc['proveedor']['id'],'tipo':'DEVOLUCION_PROVEEDOR','folio':folio,'fecha':now()[:10],'creado':now(),'actor':actor['email'],'referencia':source['folio'],'observaciones':req['motivo'],'partidas':parts,'total':money(sum((Decimal(l['base'])+Decimal(l['impuestos']) for l in parts),Decimal(0))),'recepcionId':source['id'],'autorizadoPor':actor['email'],'solicitadoPor':req['solicitadoPor']};source.setdefault('devoluciones',[]).append(value);db.execute('UPDATE po_moves SET payload=? WHERE id=?',(dumps(source),source['id']));db.execute('INSERT INTO po_moves VALUES(?,?,?,?,?)',(id,doc['id'],'DEVOLUCION_PROVEEDOR','devprov:'+id,dumps(value)));inv.po.update_doc(db,doc,actor,'DEVOLUCION_PROVEEDOR');return {'devolucion':value,'folioDevolucion':folio}
+
+ def submit_transfer_cancel(self,data,actor):
+  inv=self.inv;inv.scope(actor)
+  with inv.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE');repeat=inv.repeat(db,data)
+   if repeat:return repeat
+   row=db.execute('SELECT payload FROM inv_transfers WHERE id=?',(data.get('traspaso'),)).fetchone()
+   if not row:raise ValueError('Traspaso no encontrado.')
+   doc=json.loads(row[0]);info=inv.scope(actor,doc['origen'],db,True)
+   if doc['revision']!=data.get('revision') or doc['estado'] not in ('SOLICITADA','EN_TRANSITO','PARCIAL'):raise Conflict('El traspaso cambió o está cerrado.')
+   if doc['estado']!='SOLICITADA' and (data.get('confirmarDevolucion') is not True or not text(data.get('persona',''),200)):raise ValueError('Confirma el regreso físico del tránsito e indica quién recibe en origen.')
+   req={'id':uuid.uuid4().hex,'almacen':info['id'],'ciclo':info['ciclo'],'estado':'PENDIENTE','fecha':now(),'solicitadoPor':actor['email'],'motivo':text(data.get('motivo',''),2000),'tipo':'CANCELAR_TRASPASO','traspaso':doc['id'],'revisionTraspaso':doc['revision'],'folio':doc['folio'],'persona':text(data.get('persona',''),200),'confirmarDevolucion':data.get('confirmarDevolucion') is True,'partidas':[{**{k:m[k] for k in ('sku','nombre','unidad')},'cantidad':m['cantidad'] if doc['estado']=='SOLICITADA' else fmt(Decimal(m['cantidad'])-Decimal(m['recibido'])-Decimal(m.get('devuelto','0'))),'cantidadEntrega':'','unidadEntrega':''} for m in doc['partidas']]};result=None
+   if actor['role'] in APPROVERS:result=self.apply_transfer_cancel(db,req,actor);req.update({'estado':'APROBADA','autorizadoPor':actor['email'],'resuelto':now(),'comentario':req['motivo']})
+   db.execute('INSERT INTO inv_operations VALUES(?,?,?,?)',(req['id'],info['id'],req['estado'],dumps(req)));return inv.remember(db,data,{'ok':True,'solicitud':req,**(result or {})})
+ def apply_transfer_cancel(self,db,req,actor):
+  inv=self.inv;row=db.execute('SELECT payload FROM inv_transfers WHERE id=?',(req['traspaso'],)).fetchone();doc=json.loads(row[0]) if row else None
+  if not doc or doc['revision']!=req['revisionTraspaso']:raise Conflict('El traspaso cambió después de solicitar la cancelación. Rechaza la propuesta y revisa de nuevo.')
+  inv.cancel_transfer(db,doc,{**req,'solicitadoPor':req['solicitadoPor']},actor);doc['revision']+=1;db.execute('UPDATE inv_transfers SET state=?,payload=? WHERE id=?',(doc['estado'],dumps(doc),doc['id']));return {'traspaso':doc}
 
  def missing_issues(self,w,actor):
   if actor['role'] not in APPROVERS:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador concilian movimientos de almacén.')

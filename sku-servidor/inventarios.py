@@ -10,7 +10,7 @@ from ventas import norm
 APPROVERS={'gerente','superadmin','auxti'}
 OPERATORS=APPROVERS|{'almacenista','compras'}
 HEADERS=['SKU','DESCRIPCION','UNIDAD_ENTREGA','FISICO']
-SYSTEM_CONCEPTS={'DEVOLUCION_PROVEEDOR':'Devolución al proveedor','INICIAL':'Inventario inicial','AJUSTE':'Ajuste por conteo físico','RECEPCION_COMPRA':'Compra recibida','CANCELACION_RECEPCION_COMPRA':'Cancelación/devolución de compra recibida','REQUISICION_SURTIDO':'Surtido de requisición','REQUISICION_DEVOLUCION':'Reversión de surtido de requisición','TRASPASO_SALIDA':'Salida a otro almacén','TRASPASO_ENTRADA':'Recepción de otro almacén','TRASPASO_DEVOLUCION':'Devolución de traspaso','RESTABLECER':'Restablecimiento autorizado'}
+SYSTEM_CONCEPTS={'TRASPASO_CANCELACION':'Cancelación de tránsito y devolución al origen','DEVOLUCION_PROVEEDOR':'Devolución al proveedor','INICIAL':'Inventario inicial','AJUSTE':'Ajuste por conteo físico','RECEPCION_COMPRA':'Compra recibida','CANCELACION_RECEPCION_COMPRA':'Cancelación/devolución de compra recibida','REQUISICION_SURTIDO':'Surtido de requisición','REQUISICION_DEVOLUCION':'Reversión de surtido de requisición','TRASPASO_SALIDA':'Salida a otro almacén','TRASPASO_ENTRADA':'Recepción de otro almacén','TRASPASO_DEVOLUCION':'Devolución de traspaso','RESTABLECER':'Restablecimiento autorizado'}
 
 def dec(value,positive=False):
  if isinstance(value,bool) or value is None or str(value).strip()=='':raise ValueError('Cantidad/costo requerido; una celda vacía no equivale a cero.')
@@ -167,7 +167,7 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
     posted=bool(db.execute('SELECT 1 FROM inv_ledger WHERE source LIKE ? LIMIT 1',('compra:'+id+':%',)).fetchone())
     for line in move['partidas']:
      if sku and line['sku'].upper()!=sku:continue
-     returned=sum((Decimal(l['cantidad']) for d in move.get('devoluciones',[]) for l in d['partidas'] if l['linea']==line['linea']),Decimal(0));returned_delivery=sum((Decimal(l['cantidadEntrega']) for d in move.get('devoluciones',[]) for l in d['partidas'] if l['linea']==line['linea']),Decimal(0));qty=Decimal(line['cantidadEntrega']);result.append({'id':id,'linea':line['linea'],'cantidadDevuelta':fmt(returned),'cantidadDevueltaEntrega':fmt(returned_delivery),'cantidadNetaEntrega':fmt(qty-returned_delivery),'pendienteDevolver':fmt(Decimal(line['cantidad'])-returned),'devoluciones':[{k:d[k] for k in ('folio','fecha','actor','solicitadoPor','observaciones')} for d in move.get('devoluciones',[])],'pedido':order['folio'],'recepcion':move['folio'],'fecha':move['creado'],'proveedor':order['proveedor']['nombre'],'sku':line['sku'],'nombre':line['nombre'],'cantidadRecibida':line['cantidad'],'unidadCompra':line['unidad'],'cantidadEntrega':line['cantidadEntrega'],'unidadEntrega':line['unidadEntrega'],'materialId':line['materialId'],'registradoEnInventario':posted,'cancelada':bool(move.get('cancelacion')),'cancelacion':move.get('cancelacion'),'recibio':move['actor'],'costoUnitario':fmt(Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['precio'])/Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['factorEntrega']))})
+     returned=sum((Decimal(l['cantidad']) for d in move.get('devoluciones',[]) for l in d['partidas'] if l['linea']==line['linea']),Decimal(0));returned_delivery=sum((Decimal(l['cantidadEntrega']) for d in move.get('devoluciones',[]) for l in d['partidas'] if l['linea']==line['linea']),Decimal(0));cancelled=sum((Decimal(l['cantidad']) for c in move.get('cancelacionesParciales',[]) for l in c['partidas'] if l['linea']==line['linea']),Decimal(0));cancelled_delivery=sum((Decimal(l['cantidadEntrega']) for c in move.get('cancelacionesParciales',[]) for l in c['partidas'] if l['linea']==line['linea']),Decimal(0));qty=Decimal(line['cantidadEntrega']);cancelled=Decimal(line['cantidad']) if move.get('cancelacion') and not move.get('cancelacionesParciales') else cancelled;cancelled_delivery=qty if move.get('cancelacion') and not move.get('cancelacionesParciales') else cancelled_delivery;result.append({'id':id,'linea':line['linea'],'cantidadDevuelta':fmt(returned),'cantidadDevueltaEntrega':fmt(returned_delivery),'cantidadCancelada':fmt(cancelled),'cantidadCanceladaEntrega':fmt(cancelled_delivery),'cantidadNetaEntrega':fmt(qty-returned_delivery-cancelled_delivery),'pendienteDevolver':fmt(Decimal(line['cantidad'])-returned-cancelled),'devoluciones':[{k:d[k] for k in ('folio','fecha','actor','solicitadoPor','observaciones')} for d in move.get('devoluciones',[])],'pedido':order['folio'],'recepcion':move['folio'],'fecha':move['creado'],'proveedor':order['proveedor']['nombre'],'sku':line['sku'],'nombre':line['nombre'],'cantidadRecibida':line['cantidad'],'unidadCompra':line['unidad'],'cantidadEntrega':line['cantidadEntrega'],'unidadEntrega':line['unidadEntrega'],'materialId':line['materialId'],'registradoEnInventario':posted,'cancelada':bool(move.get('cancelacion')),'cancelacion':move.get('cancelacion'),'recibio':move['actor'],'costoUnitario':fmt(Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['precio'])/Decimal(next(p for p in order['partidas'] if p['linea']==line['linea'])['factorEntrega']))})
   return {'recepciones':result}
  def pending_receipts(self,w,actor):
   info=self.scope(actor,w);result=[]
@@ -324,11 +324,24 @@ CREATE TRIGGER IF NOT EXISTS inv_ledger_no_delete BEFORE DELETE ON inv_ledger BE
       seen.add(m['sku']);destination=doc['destino'] if action=='recibir' else doc['origen'];self.post(db,destination,m,q,Decimal(m['costo']),data['clave']+':'+m['sku'],'TRASPASO_ENTRADA' if action=='recibir' else 'TRASPASO_DEVOLUCION',actor,doc['folio'],text(data.get('motivo',''),2000),{'recibe':person,'origen':doc['origen']});field='recibido' if action=='recibir' else 'devuelto';m[field]=fmt(Decimal(m.get(field,'0'))+q);received.append({'sku':m['sku'],'cantidad':fmt(q)})
      doc.setdefault('recepciones',[]).append({'fecha':now(),'actor':actor['email'],'recibe':person,'tipo':action,'partidas':received});doc['estado']=('CERRADA_CON_DEVOLUCION' if any(Decimal(m.get('devuelto','0')) for m in doc['partidas']) else 'RECIBIDA') if all(Decimal(m['cantidad'])==Decimal(m['recibido'])+Decimal(m.get('devuelto','0')) for m in doc['partidas']) else 'PARCIAL'
     elif action=='cancelar':
-     if doc['estado']!='SOLICITADA' or actor['role'] not in APPROVERS:raise PermissionError('Solo los autorizadores cancelan solicitudes antes de enviarse.')
-     doc.update({'estado':'CANCELADA','canceladoPor':actor['email'],'cancelado':now()})
+     self.cancel_transfer(db,doc,data,actor)
     else:raise ValueError('Acción de traspaso inválida.')
     doc['revision']+=1;db.execute('UPDATE inv_transfers SET state=?,payload=? WHERE id=?',(doc['estado'],dumps(doc),doc['id']))
    return self.remember(db,data,{'ok':True,'traspaso':doc})
+ def cancel_transfer(self,db,doc,data,actor):
+  if actor['role'] not in APPROVERS:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador autorizan cancelaciones de traspasos.')
+  self.scope(actor,doc['origen'],db,True)
+  if doc['estado'] not in ('SOLICITADA','EN_TRANSITO','PARCIAL'):raise Conflict('Este traspaso ya está cerrado. Las cantidades recibidas requieren una devolución física mediante otro traspaso.')
+  returned=[];reason=text(data.get('motivo',''),2000);person=text(data.get('persona',''),200)
+  if doc['estado']!='SOLICITADA':
+   if data.get('confirmarDevolucion') is not True or not person:raise ValueError('Confirma el regreso físico del material pendiente en tránsito e indica quién lo recibe en origen.')
+   for m in doc['partidas']:
+    q=Decimal(m['cantidad'])-Decimal(m['recibido'])-Decimal(m.get('devuelto','0'))
+    if q<=0:continue
+    self.post(db,doc['origen'],m,q,Decimal(m['costo']),'canceltrasp:'+doc['id']+':'+m['sku'],'TRASPASO_CANCELACION',actor,doc['folio'],reason,{'recibe':person,'destino':doc['destino'],'concepto':'Cancelación de tránsito y devolución al origen'});m['devuelto']=fmt(Decimal(m.get('devuelto','0'))+q);returned.append({'sku':m['sku'],'cantidad':fmt(q)})
+   doc.setdefault('recepciones',[]).append({'fecha':now(),'actor':actor['email'],'recibe':person,'tipo':'cancelacion','partidas':returned})
+  doc.update({'estado':'CANCELADA_PARCIAL' if any(Decimal(m['recibido'])>0 for m in doc['partidas']) else 'CANCELADA','canceladoPor':actor['email'],'cancelado':now(),'cancelacion':{'motivo':reason,'autorizadoPor':actor['email'],'solicitadoPor':data.get('solicitadoPor',actor['email']),'devuelto':returned,'recibe':person}})
+
  def receipt(self,db,doc,move,actor):
   w=str(doc['empresa'])+':'+doc['sucursal'];row=db.execute('SELECT active FROM inv_warehouses WHERE id=?',(w,)).fetchone()
   if not row:

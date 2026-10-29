@@ -48,6 +48,7 @@
 !/tests/test_password_areas.py
 !/tests/test_ticket.py
 !/tests/test_fulfillment.py
+!/tests/test_inventory_documents.py
 !/tests/mobile_menu_regression.mjs
 **/__pycache__/
 *.pyc

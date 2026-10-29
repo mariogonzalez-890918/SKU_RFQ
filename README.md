@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.6
+# GMP ERP · Versión 3.1.7
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -8,7 +8,9 @@ Aplicación para Windows y servidor local con generadores de SKU de compras y ve
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
 
-## Cambios 3.1.6
+## Cambios 3.1.7
+
+Recepciones y cancelaciones de recepción permiten cantidades opcionales por partida o todo el remanente; Compras también cancela cantidades pendientes de pedido sin tocar lo recibido. Los traspasos se cancelan con autorización conservando lo recibido y registrando el regreso físico del tránsito. Autorizaciones de negativos tiene un aviso destacado y contador de todos los almacenes asignados. Salida y recepciones de traspaso tienen PDF con firmas. Reportes incorpora PDF de recepciones de compras y entrega explícita de requisiciones a Compras con botón, fecha de servidor y usuario registrado. Iconos diferenciados: cerebro para SKU Compras, pesos para SKU Ventas, carrito para Compras y computadora para perfiles.
 
 La barra lateral contraída muestra solo iconos, con nombre accesible y tooltip; se corrige el texto recortado de Almacenes, Pedidos, Expendios y Compras. Desplegada conserva nombres completos, incluidos celular y tablet.
 

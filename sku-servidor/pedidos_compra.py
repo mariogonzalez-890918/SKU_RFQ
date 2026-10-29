@@ -293,6 +293,17 @@ class PurchaseStore:
     if not issuer.get('activa') or issuer.get('eliminada'):raise ValueError('La razón social ya no está activa.')
     if not db.execute("SELECT 1 FROM po_vendors WHERE id=? AND company=? AND json_extract(payload,'$.activo')=1",(doc['proveedor']['id'],doc['empresa'])).fetchone():raise ValueError('El proveedor ya no está activo.')
     doc['cotizacionOrigen']=doc['folio'];doc['folio']=self.next_number(db,doc['empresa'],doc['sucursal'],'PEDIDO',doc['id']);doc['estado']='PEDIDO';doc['confirmado']=now()
+   elif action=='cancelar_partidas':
+    if doc['estado'] not in ('PEDIDO','RECEPCION_PARCIAL','RECIBIDO'):raise ValueError('Solo se cancelan cantidades pendientes de un pedido confirmado.')
+    requested=data.get('partidas');seen=set();cancelled=[]
+    if not isinstance(requested,list) or not requested:raise ValueError('Selecciona las partidas y cantidades pendientes a cancelar.')
+    for r in requested:
+     line=next((l for l in doc['partidas'] if l['linea']==r.get('linea')),None);q=number(r.get('cantidad'),True)
+     if not line or line['linea'] in seen or q>Decimal(line['cantidad'])-Decimal(line['recibido']):raise ValueError('Solo puedes cancelar cantidades pendientes, sin repetir partidas. Para cantidades recibidas utiliza cancelación de recepción o devolución al proveedor.')
+     seen.add(line['linea']);line.setdefault('cantidadOriginal',line['cantidad']);line['cantidadCancelada']=format(Decimal(line.get('cantidadCancelada','0'))+q,'f');line['cantidad']=format(Decimal(line['cantidad'])-q,'f');line['cantidadEntrega']=format(Decimal(line['cantidad'])*Decimal(line['factorEntrega']),'f');raw_base=Decimal(line['cantidad'])*Decimal(line['precio']);raw_tax=raw_base*Decimal(line['impuesto'])/100;line['base']=money(raw_base);line['importeImpuesto']=money(raw_tax);line['total']=money(raw_base+raw_tax);cancelled.append({'linea':line['linea'],'sku':line['sku'],'cantidad':format(q,'f'),'unidad':line['unidad']})
+    doc.setdefault('cancelacionesPartidas',[]).append({'fecha':now(),'actor':actor['email'],'motivo':text(data.get('motivo',''),3000),'partidas':cancelled})
+    for k in ('base','importeImpuesto','total'):doc[k]=money(sum((Decimal(l[k]) for l in doc['partidas']),Decimal(0)))
+    doc['estado']='CANCELADO' if not any(Decimal(l['cantidad']) for l in doc['partidas']) else 'COMPRADO' if all(Decimal(l['comprado'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'RECIBIDO' if all(Decimal(l['recibido'])==Decimal(l['cantidad']) for l in doc['partidas']) else 'RECEPCION_PARCIAL' if any(Decimal(l['recibido']) for l in doc['partidas']) else 'PEDIDO'
    elif action=='cancelar':
     if doc['estado']=='CANCELADO' or any(Decimal(l['recibido']) or Decimal(l['comprado']) for l in doc['partidas']):raise ValueError('No se cancela un pedido que ya tiene recepciones o compras; requiere devolución documentada.')
     reason=text(data.get('motivo',''),3000)
