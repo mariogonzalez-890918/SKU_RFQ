@@ -1,4 +1,6 @@
-# RFQ_SKU_GMP · Versión 2.1.1
+# GMP ERP · Versión 3.0.0
+
+Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
 Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos separados, acceso por IP/HTTP y respaldo comercial. Consulta [instalación y alcance de v2](docs/v2.0/IMPLEMENTACION.md).
 

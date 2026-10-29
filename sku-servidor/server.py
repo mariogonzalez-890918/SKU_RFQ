@@ -15,11 +15,12 @@ from app_info import TITLE,VERSION,SUPPORT_LINE
 from imagenes import ImageStore
 from aprobaciones_admin import AdminApprovals
 from comercial_routes import CommercialAPI
+from pedidos_compra_routes import PurchaseAPI
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
 ADMIN_EMAIL='sistemas@grupomipan.com'
-ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventasins':'VentasIns','expendios':'Expendios'}
+ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventaspasteleria':'VENTASPASTELERIA','ventasins':'VentasIns','expendios':'Expendios'}
 def read_scope(actor,scope):
  require_module(actor,scope)
 def write_scope(actor,scope):
@@ -217,6 +218,7 @@ def create_handler(store):
  commercial.sync.apply_initial()
  requisitions=RequisitionStore(store)
  reports=ReportStore(store,requisitions)
+ procurement=PurchaseAPI(store,commercial.cm,requisitions,reports)
  workflow=WorkflowStore(store,requisitions,reports)
  purchases=PurchaseImporter(store,sku,validate,protect)
  images=ImageStore(store,requisitions)
@@ -246,6 +248,21 @@ def create_handler(store):
     if not any(m in enabled_modules(actor) for m in ('ventasins','expendios')):return self.reply(403,{'error':'Módulo comercial no habilitado.'})
     file,kind={'/comercial':('commercial.html','text/html'),'/commercial.js':('commercial.js','text/javascript'),'/commercial.css':('commercial.css','text/css')}[path]
     return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
+   if path in ('/compras','/purchase.js','/purchase.css'):
+    try:
+     require_module(actor,'pedidoscompra');file,kind={'/compras':('purchase.html','text/html'),'/purchase.js':('purchase.js','text/javascript'),'/purchase.css':('purchase.css','text/css')}[path];return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+   linked_purchase=re.fullmatch('/api/requisiciones/([a-f0-9]{32})/pedidos-compra',path)
+   if linked_purchase:
+    try:return self.reply(200,procurement.po.links_for_requisition(linked_purchase[1],actor))
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except ValueError as e:return self.reply(400,{'error':str(e)})
+   if path.startswith('/api/pedidoscompra/'):
+    try:
+     result=procurement.get(path,parse_qs(urlsplit(self.path).query),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except RequisitionConflict as e:return self.reply(409,{'error':str(e)})
+    except (ValueError,KeyError,TypeError,ArithmeticError) as e:return self.reply(400,{'error':str(e)})
    if path.startswith('/api/comercial/'):
     try:
      result=commercial.get(path,parse_qs(urlsplit(self.path).query),actor)
@@ -358,6 +375,8 @@ def create_handler(store):
     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),actor['csrf']):return self.reply(403,{'error':'Solicitud sin verificación de sesión.'})
     if self.path=='/api/logout' and self.command=='POST':
      store.logout(self.token);return self.reply(200,{'ok':True},cookie='gmp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+    if self.path.startswith('/api/pedidoscompra/') and self.command=='POST':
+     result=procurement.mutate(self.path,self.read_body(),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
     if self.path.startswith('/api/comercial/') and self.command=='POST':
      result=commercial.mutate(self.path,self.read_body(),actor)
      return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
@@ -418,6 +437,7 @@ def create_handler(store):
    except Exception:self.reply(500,{'error':'No se pudo guardar. Revisa el registro del servidor.'})
   def log_message(self,fmt,*args):print(self.address_string(),fmt%args,flush=True)
  Handler.commercial=commercial
+ Handler.procurement=procurement
  return Handler
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--host',default='0.0.0.0');parser.add_argument('--port',type=int);parser.add_argument('--data-dir',default=str(APP_DIR/'data'));args=parser.parse_args()

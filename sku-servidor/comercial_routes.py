@@ -1,3 +1,4 @@
+from plantillas_import import customer_import
 from precios_masivos import import_prices
 """Rutas de la v2, aisladas de los catálogos y requisiciones existentes."""
 from comercial import CommercialStore,CHANNELS,tax_name
@@ -11,6 +12,8 @@ class CommercialAPI:
  def __init__(self,store):self.cm=CommercialStore(store);self.sync=SyncService(self.cm)
  def get(self,path,query,actor):
   cm=self.cm;channel=query.get('canal',['ventasins'])[0];cm.module(actor,channel);company=int(query.get('empresa',['0'])[0]);action=path.removeprefix('/api/comercial/')
+  if actor['role']=='ventaspasteleria' and action not in ('meta','productos','clientes','documentos','documento','imprimir','documento/excel','pedidos/cancelaciones'):raise PermissionError('VENTASPASTELERIA solo captura y consulta sus pedidos y presupuestos.')
+  if action=='pedidos/cancelaciones':return cm.institutional_cancel_requests(company,actor)
   if action=='meta':return cm.metadata(actor,channel)
   if action=='fuente':return self.sync.config(actor)
   if action=='accesos':return cm.access_list(actor)
@@ -22,6 +25,11 @@ class CommercialAPI:
   if action=='precios/layout':
    from ventas import ROOT
    cm.admin(actor);return (ROOT/'public/layout-precios.xlsx').read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if action=='plantillas/layout':
+   from ventas import ROOT
+   cm.module(actor,'ventasins')
+   if actor['role'] not in ('gerente','auxti','superadmin'):raise PermissionError('Solo Gerencia y administración gestionan plantillas.')
+   return (ROOT/'public/layout-plantillas-clientes.xlsx').read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if action=='productos/layout':
    from ventas import ROOT
    return (ROOT/'public/layout-productos.xlsx').read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -38,7 +46,10 @@ class CommercialAPI:
     if channel=='ventasins' and not p.get('institucional',True) or channel=='expendios' and not p.get('expendio'):continue
     ch='AMBOS' if p.get('institucional',True) and p.get('expendio') else 'EXPENDIOS' if p.get('expendio') else 'INSTITUCIONALES';prices=p.get('precios',{});rows.append([p['sku'],p['nombre'],ch,p['unidad'],tax_name(p.get('iva')),p['iva'] if p.get('iva') is not None else 'PENDIENTE',prices.get('PUBLICO',''),prices.get('RUTA',''),prices.get('DESPACHO',''),'SI' if p.get('activo') else 'NO'])
    return report_xlsx(rows),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  if action=='clientes':return cm.customers(company,actor,channel)
+  if action=='clientes':
+   result=cm.customers(company,actor,channel)
+   if actor['role']=='ventaspasteleria':result['clientes']=[{k:c[k] for k in ('id','codigo','nombre','activo') if k in c} for c in result['clientes']]
+   return result
   if action=='precios':return cm.prices(company,actor)
   if action=='plantillas':return cm.templates(company,actor)
   if action=='reportes':return cm.report_definitions(company,actor,channel)
@@ -53,6 +64,10 @@ class CommercialAPI:
   raise ValueError('Opción comercial no encontrada.')
  def mutate(self,path,data,actor):
   cm=self.cm;channel=data.get('canal','ventasins');cm.module(actor,channel);action=path.removeprefix('/api/comercial/')
+  if actor['role']=='ventaspasteleria' and action not in ('pedidos','pedidos/cancelacion/solicitar'):raise PermissionError('VENTASPASTELERIA solo puede agregar nuevos pedidos y presupuestos.')
+  if action=='pedidos/cancelacion/solicitar':return cm.request_institutional_cancel(data,actor)
+  if action=='pedidos/cancelacion/resolver':return cm.decide_institutional_cancel(data,actor)
+  if action=='pedidos/bloqueo':return cm.toggle_order_lock(data,actor)
   if action=='empresas':return cm.save_company(data,actor)
   if action=='sucursales/empresas':return cm.save_branch_companies(data,actor)
   if action=='fuente':return self.sync.save(data,actor)
@@ -64,6 +79,7 @@ class CommercialAPI:
   if action=='clientes/importar':return import_customers(cm,data,actor,channel)
   if action=='productos':return save_product(cm,data,actor)
   if action=='precios':return cm.save_price(data,actor)
+  if action=='plantillas/importar':return customer_import(cm,data,actor)
   if action=='plantillas':return cm.save_template(data,actor)
   if action=='reportes':return cm.save_report(data,actor,channel)
   if action=='folios':return cm.save_sequence(data,actor)

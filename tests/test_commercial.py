@@ -19,7 +19,7 @@ class CommercialTests(fixtures.ModuleBackupTests):
  def new_user(self,role,companies=None,branches=None,boxes=None):
   email=role+'@example.test';self.value('/api/users',{'email':email,'name':role,'role':role,'password':self.password,'active':True,'sucursales':['EJIDOS','SAN PABLO','CUAUTITLAN','EJE 8'] if role=='gerente' else [],'almacenes':[]})
   if role in ('auxti','gerente'):
-   profiles=self.value('/api/perfiles')['perfiles'];p=next(p for p in profiles if p['perfil']==role);self.value('/api/perfiles',{'perfil':role,'revision':p['revision'],'modulos':p['modulos']+['ventasins','expendios']},method='PUT')
+   profiles=self.value('/api/perfiles')['perfiles'];p=next(p for p in profiles if p['perfil']==role);self.value('/api/perfiles',{'perfil':role,'revision':p['revision'],'modulos':list(dict.fromkeys(p['modulos']+['ventasins','expendios']))},method='PUT')
   if companies is not None:self.cm('accesos',{'email':email,'empresas':companies,'sucursales':branches or ['EJIDOS'],'cajas':boxes or [],'acciones':[],'revision':0})
   return self.login(email)
  def order(self,actor=None,**fields):
@@ -43,6 +43,7 @@ class CommercialTests(fixtures.ModuleBackupTests):
   self.load_master();series=next(s for s in self.cm('folios')['series'] if s['tipo']=='PEDIDO');self.cm('folios',{'empresa':self.company,'tipo':'PEDIDO','revision':series['revision'],'serie':'INST','siguiente':150,'ancho':5})
   data={'empresa':self.company,'sucursal':'EJIDOS','clave':uuid.uuid4().hex,'partidas':[{'sku':SKU,'cantidad':'1'}]};a=self.cm('pedidos',data)['documento'];b=self.cm('pedidos',data)['documento'];self.assertEqual(a['id'],b['id'])
   edited=self.cm('pedidos',{**data,'id':a['id'],'revision':a['revision'],'tipo':'PEDIDO','partidas':[{'sku':SKU,'cantidad':'3'}]})['documento'];self.assertEqual(edited['folio'],'INST-00150');self.assertEqual(edited['presupuestoOrigen'],a['folio']);self.assertEqual(edited['total'],'348.00')
+  edited=self.cm('pedidos/bloqueo',{'id':edited['id'],'revision':edited['revision'],'bloqueado':False})['documento']
   self.cm('pedidos/cancelar',{'id':edited['id'],'revision':edited['revision'],'motivo':'PRUEBA'});self.assertEqual(self.cm('documentos')['totales']['total'],'0.00')
  def test_pos_checkout_ignores_price_and_ticket_has_no_fiscal_data(self):
   self.load_master();doc,data,box=self.sale();self.assertEqual(doc['total'],'116.00');self.assertEqual(doc['pago']['cambio'],'4.00');self.assertEqual(self.cm('cobrar',data,channel='expendios')['documento']['id'],doc['id'])

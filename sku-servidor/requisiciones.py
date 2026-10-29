@@ -63,7 +63,7 @@ def parse_master(raw,filename):
  for number,row in rows[index+1:]:
   r={k:str(row.get(c,'') or '').strip() if c is not None else '' for k,c in columns.items()}
   r['unidad']=next((str(row[c]).strip() for c in unit_columns if str(row.get(c,'') or '').strip() and norm(row[c]) not in {'SI','NO','N A','NA','TRUE','FALSE','0','1'}),'')
-  for key,labels in {'precioCompra':('PRECIO DE COMPRA','PRECIO COMPRA','COSTO DE COMPRA'),'claveProveedor':('CLAVE PROVEEDOR',),'unidadCompra':('UOM COMPRA','UM COMPRA','UNIDAD COMPRA'),'factorMaestro':('U M','FACTOR','FACTOR CONVERSION'),'costoBaseMaestro':('COSTO','COSTO UNITARIO','COSTO POR UNIDAD DE ENTREGA')}.items():
+  for key,labels in {'impuestoCompra':('IMPUESTO','IMPUESTOS','IVA','TASA IMPUESTO'),'precioCompra':('PRECIO DE COMPRA','PRECIO COMPRA','COSTO DE COMPRA'),'claveProveedor':('CLAVE PROVEEDOR',),'unidadCompra':('UOM COMPRA','UM COMPRA','UNIDAD COMPRA'),'factorMaestro':('U M','FACTOR','FACTOR CONVERSION'),'costoBaseMaestro':('COSTO','COSTO UNITARIO','COSTO POR UNIDAD DE ENTREGA')}.items():
    c=col(*labels);r[key]=str(row.get(c,'') or '').strip() if c is not None else ''
   if not r['nombre']:continue
   if len(r['nombre'])>500 or len(r['sku'])>100 or len(r['unidad'])>160 or len(r['proveedor'])>500:raise ValueError(f'Fila {number}: datos demasiado largos.')

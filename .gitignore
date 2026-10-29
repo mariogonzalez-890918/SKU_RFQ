@@ -90,3 +90,23 @@
 !/sku-servidor/public/layout-precios.xlsx
 
 !/tests/test_commercial_updates.py
+
+!/sku/purchase-panel.html
+!/sku/purchase-ui.js
+!/sku/purchase.css
+!/sku/purchase-links-ui.js
+!/sku-servidor/public/purchase.html
+!/sku-servidor/public/purchase.js
+!/sku-servidor/public/purchase.css
+!/sku-servidor/public/layout-proveedores.xlsx
+
+!/tests/test_purchase_v3.py
+
+!/sku-servidor/public/layout-plantillas-clientes.xlsx
+!/sku-servidor/public/layout-plantillas-proveedores.xlsx
+
+!/tests/test_sales_v3_access.py
+
+!/docs/v3.0/
+/docs/v3.0/*
+!/docs/v3.0/*.md

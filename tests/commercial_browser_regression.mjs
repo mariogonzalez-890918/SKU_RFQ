@@ -8,16 +8,13 @@ for(const channel of ['ventasins','expendios']){
  const keys=vm.runInContext('Array.from({length:1000},()=>commercialKey())',context);assert.equal(new Set(keys).size,1000);
  assert(!source.includes('crypto.randomUUID'),'Ningún reinicio de captura debe requerir HTTPS.');
 }
-class Element{constructor(tag){this.tagName=tag;this.children=[];this.attributes={};}append(...nodes){this.children.push(...nodes);}prepend(...nodes){this.children.unshift(...nodes);}setAttribute(k,v){this.attributes[k]=v;}get childElementCount(){return this.children.length;}}
+class Element{constructor(tag){this.tagName=tag;this.children=[];this.attributes={};this.style={setProperty(){}};}append(...nodes){this.children.push(...nodes);}prepend(...nodes){this.children.unshift(...nodes);}setAttribute(k,v){this.attributes[k]=v;}get childElementCount(){return this.children.length;}}
 const entry=await fs.readFile('sku/commercial-entry-ui.js','utf8');
-for(const modules of [['ventasins','expendios'],['expendios'],['requisiciones']]){
- const elements=Object.fromEntries(['gmpHome','gmpModuleLinks','gmpAccessCount'].map(id=>[id,new Element('div')]));const hero=new Element('hero');elements.gmpHome.append(hero);
+for(const modules of [['ventasins','expendios','pedidoscompra'],['expendios'],['pedidoscompra'],['requisiciones']]){
+ const elements=Object.fromEntries(['gmpHome','gmpHomeCards','gmpModuleLinks','gmpAccessCount'].map(id=>[id,new Element('div')]));const hero=new Element('hero');elements.gmpHome.append(hero);
  vm.runInNewContext(entry,{currentUser:{modulos:modules},document:{createElement:tag=>new Element(tag)},$:id=>elements[id],gmpIcon:()=>new Element('svg'),gmpAllowed:{inicio:true}});
- const expected=modules.filter(m=>['ventasins','expendios'].includes(m));
- if(!expected.length){assert.equal(elements.gmpHome.children[0],hero);continue;}
- const home=elements.gmpHome.children[0];assert.equal(home.id,'gmpCommercialHome');assert.equal(home.childElementCount,expected.length);assert.equal(elements.gmpHome.children[1],hero);
- assert.deepEqual(home.children.map(e=>e.href),expected.map(m=>'/comercial?canal='+m));assert.equal(elements.gmpModuleLinks.childElementCount,expected.length);
+ const expected=modules.filter(m=>['ventasins','expendios','pedidoscompra'].includes(m));assert.equal(elements.gmpHome.children[0],hero);assert.equal(elements.gmpHome.childElementCount,1);assert.equal(elements.gmpHomeCards.childElementCount,expected.length);assert.equal(elements.gmpModuleLinks.childElementCount,expected.length);assert.deepEqual(elements.gmpHomeCards.children.map(e=>e.href),expected.map(m=>m==='pedidoscompra'?'/compras':'/comercial?canal='+m));
 }
-console.log('PASS: arranque y claves de envío por HTTP/IP sin randomUUID; accesos comerciales al principio de Inicio y permisos de visibilidad respetados.');
+console.log('PASS: HTTP/IP y accesos con iconos integrados en la cuadrícula, sin franjas superiores.');
 
 const dates=await fs.readFile('sku/date-format.js','utf8');const dc=vm.createContext({});vm.runInContext(dates,dc);assert.equal(vm.runInContext("gmpDate('2026-10-28T13:40:00-06:00')",dc),'28/10/2026 13:40:00');assert.equal(vm.runInContext("gmpDateISO('29/02/2024')",dc),'2024-02-29');assert.throws(()=>vm.runInContext("gmpDateISO('31/02/2026')",dc));assert.equal(vm.runInContext("gmpTax('8')",dc),'IEPS');assert.equal(vm.runInContext("gmpTax('16')",dc),'IVA');console.log('PASS: fechas dd/mm/yyyy, validación de fechas e identificación de IEPS/IVA.');

@@ -1,6 +1,6 @@
 from fechas import iso_date
 """Ventas institucionales y Expendios: compañías, precios finales, documentos y caja."""
-import base64,collections,decimal,hashlib,json,re,uuid
+import base64,collections,copy,decimal,hashlib,json,re,uuid
 from permissions import require_module
 from requisiciones import BRANCHES,Conflict,now,text
 
@@ -70,11 +70,11 @@ class CommercialStore:
  def action(self,actor,channel,action):
   self.module(actor,channel)
   if actor['role'] in ADMINS:return
-  default=(actor['role']==channel and action in ('clientes','pedidos','caja','reportes')) or actor['role']=='gerente' and action in ('reportes','clientes')
+  default=(actor['role']=='ventaspasteleria' and channel=='ventasins' and action=='pedidos') or (actor['role']==channel and action in ('clientes','pedidos','caja','reportes')) or actor['role']=='gerente' and action in ('reportes','clientes')
   if not default and channel+'.'+action not in self.access(actor)['acciones'] and action not in self.access(actor)['acciones']:raise PermissionError('Tu perfil permite consulta; esta acción requiere un permiso adicional.')
  def admin(self,actor):
   if actor['role'] not in ADMINS:raise PermissionError('Solo AUXTI y Superadministrador administran razones sociales y configuración comercial.')
-  if not any(m in actor.get('modulos',[]) for m in CHANNELS):raise PermissionError('No tienes un módulo comercial habilitado.')
+  if not any(m in actor.get('modulos',[]) for m in CHANNELS|{'pedidoscompra'}):raise PermissionError('No tienes un módulo comercial habilitado.')
  def company(self,id,actor,active=False,db=None):
   if type(id) is not int:raise ValueError('Selecciona una razón social.')
   if actor['role'] not in ADMINS and id not in self.access(actor)['empresas']:raise PermissionError('No tienes acceso a esta razón social.')
@@ -93,7 +93,7 @@ class CommercialStore:
   with self.store.connect() as db:
    companies=[{'id':id,'revision':rev,**json.loads(p)} for id,rev,p in db.execute('SELECT id,revision,payload FROM cm_companies ORDER BY id') if actor['role'] in ADMINS or id in access['empresas']]
    revision=db.execute('SELECT revision FROM cm_revision WHERE id=1').fetchone()[0]
-  return {'empresas':companies,'acceso':access,'sucursales':list(BRANCHES),'listas':LISTS,'iva':['0','8','16'],'revision':revision,'puedeConfigurar':actor['role'] in ADMINS,'puedeCancelarExpendios':actor['role'] in ADMINS,'puedeOperar':actor['role'] in ADMINS or actor['role']==channel or channel+'.'+('caja' if channel=='expendios' else 'pedidos') in access['acciones'],'puedeImportar':actor['role'] in ADMINS or 'maestro' in access['acciones']}
+  return {'empresas':companies,'acceso':access,'sucursales':list(BRANCHES),'listas':LISTS,'iva':['0','8','16'],'revision':revision,'puedeConfigurar':actor['role'] in ADMINS,'puedeCancelarExpendios':actor['role'] in ADMINS,'puedeGestionarPlantillas':actor['role'] in ADMINS|{'gerente'},'puedeAutorizarCancelacionInstitucional':actor['role'] in ADMINS|{'gerente'},'soloCaptura':actor['role']=='ventaspasteleria','puedeDesbloquear':actor['role'] in {'ventasins','gerente','auxti','superadmin'},'puedeOperar':actor['role']=='ventaspasteleria' or actor['role'] in ADMINS or actor['role']==channel or channel+'.'+('caja' if channel=='expendios' else 'pedidos') in access['acciones'],'puedeImportar':actor['role'] in ADMINS or 'maestro' in access['acciones']}
  def save_company(self,data,actor,remove=False):
   self.admin(actor);id=data.get('id');rev=data.get('revision',0)
   with self.store.connect() as db:
@@ -253,9 +253,11 @@ class CommercialStore:
  def templates(self,company,actor):
   self.module(actor,'ventasins');self.company(company,actor)
   with self.store.connect() as db:rows=db.execute('SELECT id,creator,revision,payload FROM cm_templates WHERE company=?',(company,)).fetchall()
-  return {'plantillas':[{'id':id,'revision':rev,**json.loads(p)} for id,creator,rev,p in rows if actor['role'] in SUPERVISORS or creator==actor['email']]}
+  return {'plantillas':[{'id':id,'revision':rev,**json.loads(p)} for id,creator,rev,p in rows if actor['role'] in SUPERVISORS|{'ventasins'} or creator==actor['email']]}
  def save_template(self,data,actor):
-  self.action(actor,'ventasins','pedidos');company=data.get('empresa');self.company(company,actor,True);name=text(data.get('nombre',''),160);lines=data.get('partidas');id=data.get('id');customer=data.get('cliente') or ''
+  self.module(actor,'ventasins')
+  if actor['role'] not in ADMINS|{'gerente'}:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador administran plantillas.')
+  company=data.get('empresa');self.company(company,actor,True);name=text(data.get('nombre',''),160);lines=data.get('partidas');id=data.get('id');customer=data.get('cliente') or ''
   if not name or not isinstance(lines,list) or not 1<=len(lines)<=200:raise ValueError('Indica nombre y partidas de la plantilla.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');self.customer(db,customer,company,actor);prepared=[]
@@ -390,15 +392,16 @@ class CommercialStore:
    price=db.execute('SELECT payload,revision FROM cm_prices WHERE company=? AND list=? AND sku=? AND customer=?',(company,listing,sku,customer['id'] if customer and channel=='ventasins' else '')).fetchone()
    if not price:price=db.execute('SELECT payload,revision FROM cm_prices WHERE company=? AND list=? AND sku=? AND customer=?',(company,listing,sku,'')).fetchone()
    if not price:raise ValueError('El SKU no tiene precio en la lista de esta razón social: '+sku)
-   price_value=json.loads(price[0]);unit_price=line.get('precio',price_value['precio']) if channel=='ventasins' else price_value['precio']
+   price_value=json.loads(price[0]);unit_price=line.get('precio',price_value['precio']) if channel=='ventasins' and actor['role']!='ventaspasteleria' else price_value['precio']
    if channel=='expendios' and (line.get('precioVisto') is not None and amount(line['precioVisto'])!=amount(unit_price) or line.get('ivaVisto') is not None and amount(line['ivaVisto'])!=amount(product['iva'])):raise Conflict('Cambió el precio o IVA de '+sku+'. Actualiza los productos y revisa el total antes de cobrar.')
-   value=tax_line(line.get('cantidad'),unit_price,product['iva'],line.get('descuento','0') if channel=='ventasins' else '0')
+   value=tax_line(line.get('cantidad'),unit_price,product['iva'],line.get('descuento','0') if channel=='ventasins' and actor['role']!='ventaspasteleria' else '0')
    result.append({'sku':sku,'nombre':product['nombre'],'unidad':product['unidad'],'nota':text(line.get('nota',''),500),'revisionProducto':row[1],'revisionPrecio':price[1],**value})
   return {'empresa':company,'emisor':issuer,'sucursal':branch,'cliente':customer,'lista':listing,'partidas':result,'condiciones':text(data.get('condiciones',''),2000),'base':money(sum(D(r['base']) for r in result)),'impuesto':money(sum(D(r['impuesto']) for r in result)),'total':money(sum(D(r['total']) for r in result))}
  def document(self,db,id,actor,channel):
   self.module(actor,channel);row=db.execute('SELECT company,channel,creator,box,revision,payload FROM cm_documents WHERE id=?',(id,)).fetchone()
   if not row or row[1]!=channel:raise ValueError('Documento no encontrado.')
   self.company(row[0],actor);value=json.loads(row[5]);self.branch(value['emisor'],value['sucursal'],actor)
+  if channel=='ventasins':value.setdefault('bloqueado',value.get('tipo')=='PEDIDO')
   if channel=='expendios':
    box=self.box(db,row[3],row[0],actor);value.setdefault('cajaNombre',box['nombre']);value.setdefault('cajaCodigo',box['codigo'])
   if actor['role'] not in SUPERVISORS and row[2]!=actor['email']:raise PermissionError('Solo puedes consultar tus documentos.')
@@ -438,6 +441,8 @@ class CommercialStore:
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');old=self.document(db,id,actor,'ventasins') if id else None;hash=fingerprint(data)
    if old and (old['empresa']!=company or data.get('revision')!=old['revision']):raise Conflict('El pedido cambió. Actualiza antes de guardar.')
+   if old and actor['role']=='ventaspasteleria':raise PermissionError('VENTASPASTELERIA solo captura nuevos documentos y consulta su historial.')
+   if old and old.get('bloqueado'):raise ValueError('El pedido está bloqueado. Solicita el desbloqueo antes de modificarlo.')
    if old and old['estado']=='CANCELADO':raise ValueError('Un documento cancelado conserva su historial y no puede modificarse.')
    if not old:
     repeat=db.execute("SELECT id,fingerprint FROM cm_documents WHERE creator=? AND channel='ventasins' AND client_key=?",(actor['email'],key)).fetchone()
@@ -449,16 +454,25 @@ class CommercialStore:
    if old and old['tipo']=='PEDIDO' and kind!='PEDIDO':raise ValueError('Un pedido no puede volver a presupuesto.')
    pedido=iso_date(data.get('fechaPedido',(old or {}).get('fechaPedido',(old or {}).get('fecha',now())[:10])))
    entrega=iso_date(data.get('fechaEntrega',(old or {}).get('fechaEntrega','')))
-   value.update({'fechaPedido':pedido or now()[:10],'fechaEntrega':entrega})
+   value.update({'fechaPedido':pedido or now()[:10],'fechaEntrega':entrega,'clienteOpcional':text(data.get('clienteOpcional',(old or {}).get('clienteOpcional','')),300)})
    number=old['folio'] if old and kind==old['tipo'] else self.next_number(db,company,kind)
-   value.update({'tipo':kind,'folio':number,'presupuestoOrigen':old['folio'] if old and old['tipo']=='PRESUPUESTO' and kind=='PEDIDO' else (old or {}).get('presupuestoOrigen',''),'estado':'PEDIDO' if kind=='PEDIDO' else 'PRESUPUESTO','fecha':old['fecha'] if old else now(),'modificado':now(),'creador':old['creador'] if old else actor['email']})
+   value.update({'bloqueado':True if kind=='PEDIDO' and (not old or old['tipo']!='PEDIDO') else (old or {}).get('bloqueado',False),'tipo':kind,'folio':number,'presupuestoOrigen':old['folio'] if old and old['tipo']=='PRESUPUESTO' and kind=='PEDIDO' else (old or {}).get('presupuestoOrigen',''),'estado':'PEDIDO' if kind=='PEDIDO' else 'PRESUPUESTO','fecha':old['fecha'] if old else now(),'modificado':now(),'creador':old['creador'] if old else actor['email']})
    return self.persist(db,value,actor,'ventasins',key,hash,old)
+ def toggle_order_lock(self,data,actor):
+  self.module(actor,'ventasins')
+  if actor['role'] not in {'ventasins','gerente','auxti','superadmin'}:raise PermissionError('Tu perfil no puede bloquear o desbloquear pedidos.')
+  with self.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE');doc=self.document(db,data.get('id'),actor,'ventasins')
+   if doc['revision']!=data.get('revision'):raise Conflict('El documento cambió. Actualiza.')
+   if doc['estado']=='CANCELADO' or type(data.get('bloqueado')) is not bool:raise ValueError('No se puede cambiar el bloqueo de este documento.')
+   before=copy.deepcopy(doc);doc['bloqueado']=data['bloqueado'];doc['bloqueo']={'actor':actor['email'],'fecha':now(),'bloqueado':doc['bloqueado']};self.audit(db,actor,doc['empresa'],'bloqueo_pedido',{'id':doc['id'],'bloqueado':doc['bloqueado']});return self.persist(db,doc,actor,'ventasins','','',before)
  def cancel_order(self,data,actor):
   self.action(actor,'ventasins','pedidos');reason=text(data.get('motivo',''),1000)
   if not reason:raise ValueError('Indica el motivo de cancelación.')
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');old=self.document(db,data.get('id'),actor,'ventasins')
    if data.get('revision')!=old['revision']:raise Conflict('El documento cambió.')
+   if old.get('bloqueado'):raise ValueError('Desbloquea el pedido antes de cancelarlo.')
    if old['estado']=='CANCELADO':raise ValueError('El documento ya está cancelado.')
    return self.persist(db,{**old,'estado':'CANCELADO','cancelacion':{'motivo':reason,'autor':actor['email'],'fecha':now()}},actor,'ventasins','','',old)
  def checkout(self,data,actor):
@@ -488,7 +502,7 @@ class CommercialStore:
  def cancellations(self,company,actor):
   self.module(actor,'expendios');self.company(company,actor);result=[]
   with self.store.connect() as db:
-   for id,doc,requester,state,rev,p in db.execute('SELECT id,document,requester,state,revision,payload FROM cm_cancellations WHERE company=? ORDER BY rowid DESC',(company,)):
+   for id,doc,requester,state,rev,p in db.execute("SELECT c.id,c.document,c.requester,c.state,c.revision,c.payload FROM cm_cancellations c JOIN cm_documents d ON d.id=c.document WHERE c.company=? AND d.channel='expendios' ORDER BY c.rowid DESC",(company,)):
     if actor['role'] not in ADMINS and requester!=actor['email']:continue
     try:self.document(db,doc,actor,'expendios')
     except PermissionError:continue
@@ -518,3 +532,36 @@ class CommercialStore:
    value={'documento':doc['id'],'importe':doc['total'],'metodo':doc['pago']['metodo'],'fecha':now(),'autor':actor['email']}
    db.execute('INSERT INTO cm_cash_moves VALUES(?,?,?,?)',(uuid.uuid4().hex,doc['empresa'],session['id'],dumps(value)));db.execute('UPDATE cm_sessions SET revision=revision+1 WHERE id=?',(session['id'],))
    return self.persist(db,{**doc,'reembolso':'REALIZADO','devolucion':value},actor,'expendios','','',doc)
+
+ def institutional_cancel_requests(self,company,actor):
+  self.module(actor,'ventasins');self.company(company,actor);result=[]
+  with self.store.connect() as db:
+   for id,doc,who,state,revision,payload in db.execute("SELECT c.id,c.document,c.requester,c.state,c.revision,c.payload FROM cm_cancellations c JOIN cm_documents d ON d.id=c.document WHERE c.company=? AND d.channel='ventasins' ORDER BY c.rowid DESC",(company,)):
+    try:self.document(db,doc,actor,'ventasins')
+    except PermissionError:continue
+    result.append({'id':id,'estado':state,'revision':revision,**json.loads(payload)})
+  return {'solicitudes':result}
+ def request_institutional_cancel(self,data,actor):
+  self.action(actor,'ventasins','pedidos');reason=text(data.get('motivo',''),3000)
+  if not reason:raise ValueError('Indica el motivo de la cancelación solicitada.')
+  with self.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE');doc=self.document(db,data.get('id'),actor,'ventasins')
+   if doc['estado']=='CANCELADO':raise ValueError('El documento ya está cancelado.')
+   if doc['revision']!=data.get('revision'):raise Conflict('El documento cambió. Actualiza antes de solicitar.')
+   old=db.execute("SELECT id,revision,payload FROM cm_cancellations WHERE document=? AND state='PENDIENTE'",(doc['id'],)).fetchone()
+   if old:return {'ok':True,'repetido':True,'solicitud':{'id':old[0],'revision':old[1],'estado':'PENDIENTE',**json.loads(old[2])}}
+   id=uuid.uuid4().hex;value={'folio':self.next_number(db,doc['empresa'],'CANCELACION'),'canal':'ventasins','documento':doc['id'],'folioVenta':doc['folio'],'motivo':reason,'solicitante':actor['email'],'fecha':now(),'revisionDocumento':doc['revision']};db.execute('INSERT INTO cm_cancellations VALUES(?,?,?,?,?,1,?)',(id,doc['empresa'],doc['id'],actor['email'],'PENDIENTE',dumps(value)));self.audit(db,actor,doc['empresa'],'cancelacion_institucional_solicitada',value);return {'ok':True,'solicitud':{'id':id,'revision':1,'estado':'PENDIENTE',**value}}
+ def decide_institutional_cancel(self,data,actor):
+  self.module(actor,'ventasins')
+  if actor['role'] not in ADMINS|{'gerente'}:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador autorizan cancelaciones institucionales.')
+  approve=data.get('aprobar')
+  if type(approve) is not bool:raise ValueError('Selecciona aprobar o rechazar.')
+  with self.store.connect() as db:
+   db.execute('BEGIN IMMEDIATE');row=db.execute('SELECT company,document,state,revision,payload FROM cm_cancellations WHERE id=?',(data.get('id'),)).fetchone()
+   if not row or row[2]!='PENDIENTE' or row[3]!=data.get('revision'):raise Conflict('La solicitud no está pendiente o cambió.')
+   doc=self.document(db,row[1],actor,'ventasins');value=json.loads(row[4]);value.update({'resueltoPor':actor['email'],'fechaResolucion':now(),'comentario':text(data.get('comentario',''),3000)})
+   if approve:
+    if doc['revision']!=value['revisionDocumento'] or doc['estado']=='CANCELADO':raise Conflict('El documento cambió. Rechaza esta solicitud y pide una nueva.')
+    before=copy.deepcopy(doc);doc['estado']='CANCELADO';doc['cancelacion']={'motivo':value['motivo'],'autor':actor['email'],'solicitadoPor':value['solicitante'],'fecha':now(),'solicitud':data['id']};self.persist(db,doc,actor,'ventasins','','',before)
+   db.execute('UPDATE cm_cancellations SET state=?,revision=revision+1,payload=? WHERE id=?',('APROBADA' if approve else 'RECHAZADA',dumps(value),data['id']));self.audit(db,actor,row[0],'cancelacion_institucional_resuelta',{'id':data['id'],'aprobada':approve})
+  return {'ok':True}
