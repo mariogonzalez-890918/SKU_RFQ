@@ -2,7 +2,7 @@
 import base64,copy,hashlib,hmac,json,pathlib,re,uuid,zipfile,io
 from requisiciones import BRANCHES,AREAS,Conflict,now
 from areas import default_catalog,validate_catalog
-MODULES={'compras':'SKU Compras','ventas':'SKU Ventas','requisiciones':'Requisición de compras / materiales'}
+MODULES={'compras':'SKU Compras','ventas':'SKU Ventas','requisiciones':'Requisición de compras / materiales','comercial':'Pedidos institucionales y Expendios'}
 TABLES=('req_materials','req_masters','req_branches','req_series_registry','req_documents','req_costs','req_reports','req_report_features','req_changes','req_document_versions','req_images','req_areas')
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 def check(condition,message):
@@ -36,7 +36,10 @@ class BackupStore:
   if module in ('compras','ventas'):
    table='catalog' if module=='compras' else 'sales_catalog';revision,payload=db.execute('SELECT revision,payload FROM '+table+' WHERE id=1').fetchone();return {'revision':revision,'catalogo':json.loads(payload)}
   tables={}
-  for table in TABLES:
+  selected=TABLES
+  if module=='comercial':
+   from respaldo_comercial import TABLES as selected
+  for table in selected:
    info=db.execute('PRAGMA table_info('+table+')').fetchall();columns=[r[1] for r in info];primary=[name for _,name in sorted((r[5],r[1]) for r in info if r[5])];order=','.join(primary) if primary else 'rowid'
    tables[table]={'columnas':columns,'filas':[list(row) for row in db.execute('SELECT * FROM '+table+' ORDER BY '+order)]}
   return {'tablas':tables}
@@ -55,6 +58,9 @@ class BackupStore:
   expected=backup.get('checksum');check(isinstance(expected,str) and hmac.compare_digest(expected,digest({k:v for k,v in backup.items() if k!='checksum'})),'El archivo está incompleto o su comprobación de integridad no coincide.')
   check(isinstance(backup.get('datos'),dict),'Faltan los datos del respaldo.');return copy.deepcopy(backup['datos']),False
  def validate(self,db,module,data):
+  if module=='comercial':
+   from respaldo_comercial import validate
+   return validate(db,data)
   if module in ('compras','ventas'):
    catalog=data.get('catalogo');check(isinstance(catalog,dict),'Falta el catálogo del respaldo.')
    if module=='compras':self.validate_purchase(catalog,self.store.catalogs)
@@ -123,7 +129,8 @@ class BackupStore:
    if c['tipo']=='modificar':
     values=c.get('datos');check(isinstance(values,dict) and set(values)=={'area','solicitante','observaciones','partidas'},'Campos de corrección inválidos.');document({**docs[c['objetivo']],**values})
    if c['tipo'] in ('surtir','corregir_surtido'):
-    values=c.get('datos');check(isinstance(values,dict) and not set(values)-{'partidas','area','solicitante','observaciones'} and isinstance(values.get('partidas'),list),'Datos de surtido inválidos.')
+    values=c.get('datos');check(isinstance(values,dict) and not set(values)-{'partidas','area','solicitante','observaciones','almacenInventario'} and isinstance(values.get('partidas'),list),'Datos de surtido inválidos.')
+    if values.get('almacenInventario') is not None:check(isinstance(values['almacenInventario'],str) and len(values['almacenInventario'])<100,'Almacén de surtido inválido.')
     base=docs[c['objetivo']];parts={p['materialId']:p for p in base['partidas']};seen=set()
     for line in values['partidas']:
      check(isinstance(line,dict) and set(line)=={'materialId','cantidadSurtida'} and type(line['materialId']) is int and line['materialId'] in parts and line['materialId'] not in seen,'Partidas de surtido inválidas.');seen.add(line['materialId']);check(0<=dec(line['cantidadSurtida'])<=dec(parts[line['materialId']]['cantidad']),'Cantidad surtida inválida.')
@@ -134,6 +141,9 @@ class BackupStore:
   check(bool(unpacked['req_masters']),'Falta el maestro de materiales.')
   for row in unpacked['req_masters']:check(isinstance(row['filename'],str) and row['filename'].lower().endswith(('.xlsx','.csv','.tsv','.txt')),'Archivo de maestro inválido.');base64.b64decode(row['content'],validate=True);json.loads(row['report'])
  def summary(self,module,data):
+  if module=='comercial':
+   from respaldo_comercial import summary
+   return summary(data)
   if module in ('compras','ventas'):
    state=data['catalogo']['state'];return {'articulos':len(state['registros']),'activos':sum(not r['eliminado'] for r in state['registros']),'consecutivo':state['maxId'],'skuReservados':len(state['reservados'])}
   tables=data['tablas'];return {'materiales':len(tables['req_materials']['filas']),'requisiciones':len(tables['req_documents']['filas']),'reportes':len(tables['req_reports']['filas']),'autorizaciones':len(tables['req_changes']['filas']),'versionesHistoricas':len(tables['req_document_versions']['filas']),'imagenes':len(tables['req_images']['filas']),'areas':len(json.loads(tables['req_areas']['filas'][0][2])['areas'])}
@@ -144,6 +154,7 @@ class BackupStore:
    db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);current_hash=digest(current);self.validate(db,module,incoming)
    result={'modulo':module,'nombre':MODULES[module],'actual':self.summary(module,current),'respaldo':self.summary(module,incoming),'huellaActual':current_hash,'legado':legacy,'nota':'Se reemplaza únicamente el módulo elegido. Se conservan los máximos de folios e identificadores para evitar reutilizarlos.'}
    if not apply:return result
+   if module in ('requisiciones','comercial') and db.execute("SELECT 1 FROM sqlite_master WHERE name='inv_ledger'").fetchone() and db.execute('SELECT 1 FROM inv_ledger LIMIT 1').fetchone():raise Conflict('Existen movimientos de inventario integrados. Conserva el historial y recupera una copia completa de data para no desajustar las existencias.')
    check(data.get('confirmar') is True,'Confirma que deseas reemplazar los datos del módulo seleccionado.')
    if data.get('huellaActual')!=current_hash:raise Conflict('El módulo cambió después de la revisión. Revisa el respaldo otra vez antes de restaurar.')
    backup_id=uuid.uuid4().hex;directory=self.store.directory/'respaldos';directory.mkdir(exist_ok=True);previous=self.envelope(module,current,actor);target=directory/('antes-'+backup_id+'.json');target.write_text(json.dumps(previous,ensure_ascii=False),encoding='utf8')
@@ -154,6 +165,9 @@ class BackupStore:
      from ventas import validate
      validate(catalog)
     db.execute('INSERT INTO '+history+' VALUES(?,?,?)',(current['revision'],now(),json.dumps(current['catalogo'],ensure_ascii=False)));db.execute('UPDATE '+table+' SET revision=?,payload=? WHERE id=1',(current['revision']+1,json.dumps(catalog,ensure_ascii=False)))
+   elif module=='comercial':
+    from respaldo_comercial import restore
+    restore(db,incoming,current)
    else:
     old_branches={r[0]:(r[2],r[3]) for r in current['tablas']['req_branches']['filas']};old_registry=dict(db.execute('SELECT series,branch FROM req_series_registry'))
     for table in reversed(TABLES):db.execute('DELETE FROM '+table)
@@ -172,11 +186,13 @@ class BackupStore:
  def previous(self,id,actor):
   self.authorize(actor,'compras');check(bool(re.fullmatch('[a-f0-9]{32}',id)),'Identificador inválido.');path=self.store.directory/'respaldos'/('antes-'+id+'.json');check(path.is_file(),'No se encuentra la copia de seguridad previa.');return path.read_bytes()
  def reset(self,data,actor,apply=False):
+  if data.get('modulo')=='comercial':raise ValueError('Las ventas y movimientos comerciales no se vacían. Usa respaldos y restauración para recuperar una instalación, conservando el historial.')
   if apply and actor['role']!='superadmin':raise PermissionError('AUXTI necesita aprobación de sistemas para vaciar datos.')
   module=data.get('modulo');self.authorize(actor,module)
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE' if apply else 'BEGIN');current=self.snapshot(db,module);fingerprint=digest(current);result={'modulo':module,'nombre':MODULES[module],'actual':self.summary(module,current),'huellaActual':fingerprint,'nota':'Se vacían los datos del módulo elegido. Usuarios, otros módulos y máximos de consecutivos/folios se conservan. Se crea una copia automática antes de vaciar.'}
    if not apply:return result
+   if module in ('requisiciones','comercial') and db.execute("SELECT 1 FROM sqlite_master WHERE name='inv_ledger'").fetchone() and db.execute('SELECT 1 FROM inv_ledger LIMIT 1').fetchone():raise Conflict('Existen movimientos de inventario integrados. Conserva el historial y recupera una copia completa de data para no desajustar las existencias.')
    check(data.get('confirmar') is True and data.get('texto')=='VACIAR','Escribe VACIAR para confirmar el reinicio del módulo.')
    if data.get('huellaActual')!=fingerprint:raise Conflict('El módulo cambió; vuelve a revisar antes de vaciar.')
    id=uuid.uuid4().hex;folder=self.store.directory/'respaldos';folder.mkdir(exist_ok=True);(folder/('antes-'+id+'.json')).write_text(json.dumps(self.envelope(module,current,actor),ensure_ascii=False),encoding='utf8')

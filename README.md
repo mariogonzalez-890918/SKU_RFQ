@@ -1,8 +1,37 @@
-# RFQ_SKU_GMP · Versión 1.8.0
+# GMP ERP · Versión 3.1.8
+
+Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
+
+Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos separados, acceso por IP/HTTP y respaldo comercial. Consulta [instalación y alcance de v2](docs/v2.0/IMPLEMENTACION.md).
 
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
+## Cambios 3.1.8
+
+- Botón rojo **Cancelar traspaso** en Traspasos y Recepciones entre almacenes, accesible desde ambos lados con permiso del origen.
+- Cancelación de solicitudes, tránsito, recepciones parciales y completas. El regreso físico de material recibido genera salida del destino y entrada al origen, sin borrar las recepciones originales; en parciales se puede devolver solo el tránsito o todo.
+- Almacenista solicita; Gerencia, AUXTI y Superadministrador autorizan. Se validan permisos de ambos almacenes al devolver material recibido, revisiones y ciclos; cualquier saldo negativo requiere autorización explícita.
+- El Kárdex incluye los conceptos de devolución por cancelación, con costos reservados a los tres perfiles autorizados.
+
+## Cambios 3.1.7
+
+Recepciones y cancelaciones de recepción permiten cantidades opcionales por partida o todo el remanente; Compras también cancela cantidades pendientes de pedido sin tocar lo recibido. Los traspasos se cancelan con autorización conservando lo recibido y registrando el regreso físico del tránsito. Autorizaciones de negativos tiene un aviso destacado y contador de todos los almacenes asignados. Salida y recepciones de traspaso tienen PDF con firmas. Reportes incorpora PDF de recepciones de compras y entrega explícita de requisiciones a Compras con botón, fecha de servidor y usuario registrado. Iconos diferenciados: cerebro para SKU Compras, pesos para SKU Ventas, carrito para Compras y computadora para perfiles.
+
+La barra lateral contraída muestra solo iconos, con nombre accesible y tooltip; se corrige el texto recortado de Almacenes, Pedidos, Expendios y Compras. Desplegada conserva nombres completos, incluidos celular y tablet.
+
+Recepciones de compra incluye devolución al proveedor parcial o completa del remanente. Valida cantidades contra la recepción y devoluciones anteriores, conserva el original y registra la salida en Kárdex. Almacenista solicita; Gerencia, AUXTI y Superadministrador autorizan. Se muestran cantidades recibidas, devueltas y netas; las compras/facturas originales se conservan y la devolución física se registra por separado. El reporte Excel incluye devuelto y recibido neto.
+
+Traspasos permite armar solicitudes aunque falte conteo o el físico sea cero/negativo. Enviar sin suficiente stock requiere autorización explícita de Gerencia, AUXTI o Superadministrador; no se exige activar el inventario inicial. El destino aumenta solo al confirmar cantidades recibidas. Kárdex tiene columna propia Concepto de movimiento y mantiene costos ocultos para Almacenista en pantalla y exportaciones.
+
+Resumen de existencias tiene su propio botón; Kárdex conserva el detalle. Las observaciones de cancelación y surtido son opcionales. Surtir por encima de lo solicitado requiere autorización de Gerencia, AUXTI o Superadministrador antes de modificar documento, costos o inventario. Se conserva la cantidad solicitada original y el surtido real autorizado.
+
+El Kárdex permite imprimir el resumen y detalle con los filtros actuales, descargar el reporte en PDF o exportar XML estructurado. Los costos se excluyen para Compras y Almacenista.
+
+Movimiento de almacén agrupa entradas y salidas manuales y acceso a ajustes; su uso es exclusivo de Gerencia, AUXTI y Superadministrador. Las recepciones y surtidos registran Kárdex aunque falte el conteo inicial. Los surtidos pasan directamente, incluso si exceden el saldo, y muestran una alerta de negativo. Las correcciones y cancelaciones conservan sus autorizaciones. Las salidas históricas faltantes se concilian una vez, verificando antes que el conteo físico no las haya descontado ya. El saldo previo al conteo se identifica como provisional.
+
+Compras incluye filtros propios y reportes detallados por pedido, partida, proveedor y sucursal, con cantidades pedidas, recibidas, pendientes y compradas, y exportación Excel de cinco hojas y PDF.
 
 ## Imágenes y navegación
 
@@ -101,3 +130,5 @@ Esta prueba utiliza datos vacíos y credenciales aleatorias temporales. Las guí
 Requisición y Almacenista solicitan aprobación o cancelación desde el detalle. Superadministrador, AUXTI y Gerente autorizan; se conserva el folio y el historial. Almacenista y los perfiles administrativos aprueban capturando cantidades realmente surtidas en UM_ENTREGA y la marca SURTIDO. Solicitado y surtido se muestran por separado, también en ambas impresiones, sin mostrar costos al perfil Requisición. El costeo usa lo realmente surtido y compara su total contra lo requisitado; las canceladas siguen excluidas.
 
 Versión 1.8.0: Almacenista, Superadministrador, Gerencia y AUXTI aprueban capturando las cantidades realmente surtidas y el estado SURTIDO. El almacenista solicita correcciones de surtidos con autorización; los administradores y gerencia las aplican directamente. Reportes y descargas comparan total requisitado y total surtido; el costeo usa el surtido real y las cantidades se agrupan por unidad, sin sumar unidades incompatibles. Sin captura de entrega, el surtido es cero.
+
+Inventarios 3.1: carga inicial, ajustes autorizados, surtido real, recepciones y traspasos con confirmación. Consulta [puesta en marcha de almacenes](docs/v3.1/INVENTARIOS.md).
