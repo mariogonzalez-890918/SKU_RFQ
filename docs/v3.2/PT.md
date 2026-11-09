@@ -48,3 +48,7 @@ El estado OneDrive NO conectado es explícito. La liga del libro de ejemplo no a
 Se separan Tomar foto del código y Elegir foto o imagen. La lectura se realiza localmente, admite hasta 25 MB/40 megapíxeles y prueba orientación, resolución y recortes con límite de 20 segundos. Muestra la imagen seleccionada y el avance; se permite volver a elegir la misma foto. No se puede recuperar información perdida por desenfoque o barras reducidas a muy pocos píxeles. Los errores del maestro o del servidor se muestran por separado del fallo de lectura. Las fotos no se envían al servidor.
 
 Validado con la etiqueta facilitada por el usuario en fotos JPEG de 3000×4000, giros de 0/90/180/270 grados, código Code128 girado, foto vacía, reintento de la misma imagen y error de SKU inexistente. Leer una foto no genera ingresos.
+
+## Alternativa Familia sin Client ID — 3.2.3
+
+Se agregó publicación en carpeta local/SMB de una PC Windows compatible con OneDrive. Consulta [Configuración de PC puente](CARPETA_PUENTE.md). El modo Microsoft Graph anterior sigue disponible. La cuenta Microsoft solo se inicia en OneDrive en la PC puente; GMP no solicita su contraseña. El guardado en carpeta y la sincronización en la nube son estados distintos.

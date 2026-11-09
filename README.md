@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.2.2
+# GMP ERP · Versión 3.2.3
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -7,6 +7,10 @@ Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos s
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
+## Cambios 3.2.3
+
+Publicación PT en carpeta local o compartida de una PC puente con OneDrive personal. No requiere Client ID. Incluye prueba de escritura en segundo plano, reintentos si la PC está apagada, guardado atómico y protección frente a archivos modificados fuera de GMP. El estado distingue guardado en carpeta de sincronización en la nube. Ver [configuración de PC puente](docs/v3.2/CARPETA_PUENTE.md).
 
 ## Cambios 3.2.2
 

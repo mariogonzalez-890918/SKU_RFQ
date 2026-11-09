@@ -1,5 +1,6 @@
 """Publicación serializada de Excel PT en OneDrive personal; tokens privados con DPAPI."""
 import base64,ctypes,ctypes.wintypes,json,re,threading,time,urllib.request,urllib.error,urllib.parse
+from pt_folder import validate_root,publish_folder,probe_folder
 from pt import BRANCHES,MANAGERS
 from comercial import dumps
 from requisiciones import Conflict,now,text
@@ -44,7 +45,7 @@ def upload_url(url):
 
 class OneDrivePT:
  def __init__(self,pt):
-  self.pt=pt;self.store=pt.store;pt.publisher=self;self.worker_lock=threading.Lock();self.auth_lock=threading.Lock()
+  self.pt=pt;self.store=pt.store;pt.publisher=self;self.worker_lock=threading.Lock();self.auth_lock=threading.Lock();self.destination_lock=threading.Lock()
   with self.store.connect() as db:db.execute('CREATE TABLE IF NOT EXISTS pt_cloud(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,payload TEXT NOT NULL,secret TEXT NOT NULL)');db.execute('INSERT OR IGNORE INTO pt_cloud VALUES(1,1,?,?)',(dumps({'cliente':'','cuenta':'soportetecnico@grupomipan.com','carpetas':{b:'GMP_PT/'+b.replace(' ','_') for b in BRANCHES},'habilitado':False}),'') )
  def read(self):
   with self.store.connect() as db:r=db.execute('SELECT revision,payload,secret FROM pt_cloud').fetchone()
@@ -60,31 +61,58 @@ class OneDrivePT:
   allowed=self.pt.scope(actor);revision,config,_=self.read()
   with self.store.connect() as db:
    jobs=[{'sucursal':b,'mes':m,'pendiente':r>s,'estado':state,'error':error if actor['role'] in MANAGERS else '',**({k:v for k,v in json.loads(payload).items() if k in ('archivo','enlace','publicado')} if actor['role'] in MANAGERS else {})} for b,m,r,s,state,error,payload in db.execute('SELECT branch,month,revision,synced,state,error,payload FROM pt_exports ORDER BY month DESC,branch') if b in allowed]
-  result={'conectado':bool(config.get('conectado')),'habilitado':config.get('habilitado',False),'publicaciones':jobs[:36]}
+  result={'modo':config.get('modo','microsoft'),'conectado':self.ready(config),'habilitado':config.get('habilitado',False),'publicaciones':jobs[:36]}
   if actor['role']=='superadmin':result.update({'revision':revision,'configuracion':config})
   return result
+ def ready(self,config):return bool(config.get('directorio')) if config.get('modo')=='carpeta' else bool(config.get('conectado'))
  def configure(self,data,actor):
-  with self.auth_lock:return self._configure(data,actor)
+  self.admin(actor)
+  if not self.destination_lock.acquire(False):raise Conflict('Hay una publicación en curso. Espera a que termine antes de cambiar el destino.')
+  try:
+   with self.auth_lock:result=self._configure(data,actor)
+  finally:self.destination_lock.release()
+  self.kick();return result
  def _configure(self,data,actor):
-  self.admin(actor);revision,old,_=self.read();client=text(data.get('cliente',''),36);account=text(data.get('cuenta',''),160).lower();folders=data.get('carpetas')
-  if not re.fullmatch('[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}',client) or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',account):raise ValueError('Indica el Client ID de Microsoft y el correo propietario.')
+  self.admin(actor);revision,old,_=self.read();mode=data.get('modo','microsoft');client=text(data.get('cliente',''),36);account=text(data.get('cuenta',''),160).lower();folders=data.get('carpetas')
+  if mode not in ('microsoft','carpeta'):raise ValueError('Selecciona conexión Microsoft o carpeta sincronizada.')
+  directory=validate_root(data.get('directorio','')) if mode=='carpeta' else ''
+  if mode=='microsoft' and not re.fullmatch('[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}',client):raise ValueError('Indica el Client ID de Microsoft.')
+  if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',account):raise ValueError('Indica el correo propietario de los archivos.')
   if not isinstance(folders,dict) or set(folders)!=set(BRANCHES):raise ValueError('Configura una carpeta para cada una de las tres sucursales.')
   normalized={}
   for b,p in folders.items():
    if not isinstance(p,str) or not re.fullmatch(r'[A-Za-z0-9_ /-]{1,160}',p) or any(v in ('','.','..') for v in p.split('/')):raise ValueError('Usa una ruta de carpeta válida, sin enlaces ni archivos.')
    normalized[b]=p.strip()
-  if len(set(normalized.values()))!=3:raise ValueError('Cada sucursal debe publicar en una carpeta diferente.')
-  changed=client!=old['cliente'] or account!=old['cuenta'];new={**old,'cliente':client,'cuenta':account,'carpetas':normalized,'habilitado':data.get('habilitado') is True}
+   if not normalized[b]:raise ValueError('Indica una carpeta para cada sucursal.')
+   if mode=='carpeta' and any(v.strip()!=v or re.fullmatch(r'(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])',v,re.I) for v in normalized[b].split('/')):raise ValueError('La carpeta contiene un nombre no válido para Windows.')
+  if len(set(v.casefold() for v in normalized.values()))!=3:raise ValueError('Cada sucursal debe publicar en una carpeta diferente.')
+  changed=client!=old['cliente'] or account!=old['cuenta'] or mode!=old.get('modo','microsoft');destination_changed=mode!=old.get('modo','microsoft') or directory!=old.get('directorio','') or normalized!=old['carpetas'];new={**old,'modo':mode,'directorio':directory,'cliente':client,'cuenta':account,'carpetas':normalized,'habilitado':data.get('habilitado') is True}
   if changed:new['conectado']=False
+  if destination_changed:new.pop('pruebaCarpeta',None)
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');current=db.execute('SELECT revision FROM pt_cloud').fetchone()[0]
    if current!=data.get('revision'):raise Conflict('La configuración cambió. Actualiza antes de guardar.')
    # No mover archivos ya publicados a otro destino por accidente.
-   if normalized!=old['carpetas'] and db.execute('SELECT 1 FROM pt_exports WHERE synced>0').fetchone():raise ValueError('Hay archivos publicados. Conserva sus carpetas para mantener el historial mensual.')
+   if destination_changed and db.execute('SELECT 1 FROM pt_exports WHERE synced>0').fetchone():raise ValueError('Hay archivos publicados. Conserva el mismo modo y destino para mantener el historial mensual.')
    db.execute('UPDATE pt_cloud SET revision=revision+1,payload=?,secret=CASE WHEN ? THEN ? ELSE secret END WHERE id=1',(dumps(new),changed,''))
-  self.kick();return self.status(actor)
+  return self.status(actor)
+ def test_folder(self,actor):
+  self.admin(actor);revision,config,_=self.read()
+  if config.get('modo')!='carpeta':raise ValueError('Selecciona y guarda primero el modo carpeta sincronizada.')
+  if config.get('pruebaCarpeta',{}).get('estado')=='PROBANDO':return {'ok':True,'mensaje':'La comprobación de carpeta ya está en curso.'}
+  def record(state,error=''):
+   with self.store.connect() as db:
+    db.execute('BEGIN IMMEDIATE');row=db.execute('SELECT revision,payload FROM pt_cloud WHERE id=1').fetchone()
+    if row[0]!=revision:return
+    current=json.loads(row[1]);current['pruebaCarpeta']={'estado':state,'error':error,'fecha':now()};db.execute('UPDATE pt_cloud SET payload=? WHERE id=1',(dumps(current),))
+  record('PROBANDO')
+  def run():
+   try:probe_folder(config);record('CARPETA_VERIFICADA')
+   except Exception as error:record('ERROR',str(error) if isinstance(error,ValueError) else 'No se pudo abrir la carpeta compartida. Revisa permisos y conexión con la PC puente.')
+  threading.Thread(target=run,daemon=True,name='PT-Carpeta-Prueba').start();return {'ok':True,'mensaje':'Prueba iniciada. Consulta el estado; esto no confirma sincronización en la nube.'}
  def start_auth(self,actor):
   self.admin(actor);_,config,_=self.read()
+  if config.get('modo')=='carpeta':raise ValueError('En modo carpeta no necesitas Client ID ni autorización de Microsoft dentro de GMP.')
   if not config['cliente']:raise ValueError('Primero configura el identificador de aplicación de Microsoft (Client ID).')
   with self.auth_lock:
    response=request(LOGIN+'/devicecode','POST',{'client_id':config['cliente'],'scope':SCOPES},form=True)
@@ -128,36 +156,38 @@ class OneDrivePT:
   self.pt.scope(actor)
   if actor['role'] not in MANAGERS:raise PermissionError('Solo Gerencia, AUXTI y Superadministrador publican los archivos.')
   _,config,_=self.read()
-  if not config.get('conectado') or not config.get('habilitado'):raise ValueError('Conecta OneDrive y activa la publicación automática primero.')
+  if not self.ready(config) or not config.get('habilitado'):raise ValueError('Configura el destino y activa la publicación automática primero.')
   with self.store.connect() as db:db.execute('UPDATE pt_exports SET retry_at=0,attempts=0 WHERE revision>synced')
   self.kick();return {'ok':True,'mensaje':'Publicación iniciada. Los ingresos ya están guardados en GMP.'}
  def kick(self):
   _,config,_=self.read()
-  if not config.get('conectado') or not config.get('habilitado') or not self.worker_lock.acquire(False):return
+  if not self.ready(config) or not config.get('habilitado') or not self.worker_lock.acquire(False):return
   def run():
    try:
     while self.store.path.exists():
      if self.process_once():continue
      _,current,_=self.read()
-     if not current.get('habilitado') or not current.get('conectado'):break
+     if not current.get('habilitado') or not self.ready(current):break
      with self.store.connect() as db:future=db.execute('SELECT MIN(MAX(retry_at,lease)) FROM pt_exports WHERE revision>synced AND attempts<8').fetchone()[0]
      if future is None:break
      time.sleep(max(1,min(30,future-time.time()+.1)))
    finally:self.worker_lock.release()
   threading.Thread(target=run,daemon=True,name='PT-OneDrive').start()
  def process_once(self):
+  with self.destination_lock:return self._process_once()
+ def _process_once(self):
   _,config,_=self.read()
-  if not config.get('habilitado') or not config.get('conectado'):return False
+  if not config.get('habilitado') or not self.ready(config):return False
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');job=db.execute('SELECT branch,month,revision,synced,payload FROM pt_exports WHERE revision>synced AND lease<? AND retry_at<? AND attempts<8 ORDER BY month,branch LIMIT 1',(time.time(),time.time())).fetchone()
    if not job:return False
    branch,month,revision,_,payload=job;db.execute("UPDATE pt_exports SET lease=?,state='PUBLICANDO' WHERE branch=? AND month=?",(time.time()+240,branch,month))
   try:
-   actor={'role':'superadmin','email':'publicador-pt','modulos':['pt']};raw=self.pt.workbook(actor,{'sucursal':branch,'mes':month});token=self.access_token();remote=self.publish_file(config,branch,month,raw,json.loads(payload),token)
-   with self.store.connect() as db:db.execute("UPDATE pt_exports SET synced=?,state=CASE WHEN revision>? THEN 'PENDIENTE' ELSE 'PUBLICADO' END,lease=0,error='',attempts=0,retry_at=0,payload=? WHERE branch=? AND month=?",(revision,revision,dumps({**remote,'publicado':now()}),branch,month))
+   actor={'role':'superadmin','email':'publicador-pt','modulos':['pt']};raw=self.pt.workbook(actor,{'sucursal':branch,'mes':month});remote=publish_folder(config,branch,month,raw,json.loads(payload)) if config.get('modo')=='carpeta' else self.publish_file(config,branch,month,raw,json.loads(payload),self.access_token())
+   with self.store.connect() as db:db.execute("UPDATE pt_exports SET synced=?,state=CASE WHEN revision>? THEN 'PENDIENTE' ELSE ? END,lease=0,error='',attempts=0,retry_at=0,payload=? WHERE branch=? AND month=?",(revision,revision,'GUARDADO_EN_CARPETA' if config.get('modo')=='carpeta' else 'PUBLICADO',dumps({**remote,'publicado':now()}),branch,month))
   except Exception as error:
    # Nunca guardar respuestas crudas, URLs de carga ni tokens dentro del estado público.
-   message=str(error) if isinstance(error,(CloudError,ValueError)) else 'No se pudo publicar. Reintenta la conexión con Microsoft.'
+   message=str(error) if isinstance(error,(CloudError,ValueError)) else ('No se pudo guardar en la carpeta. Revisa la PC puente, los permisos de Windows y que Excel esté cerrado.' if config.get('modo')=='carpeta' else 'No se pudo publicar. Reintenta la conexión con Microsoft.')
    with self.store.connect() as db:db.execute("UPDATE pt_exports SET state='PENDIENTE',lease=0,error=?,retry_at=?,attempts=attempts+1 WHERE branch=? AND month=?",(message[:300],time.time()+60,branch,month))
   return True
  def publish_file(self,config,branch,month,raw,old,token):

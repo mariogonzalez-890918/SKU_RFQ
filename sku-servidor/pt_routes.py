@@ -32,6 +32,7 @@ class PTAPI:
   if action=='ingresos':return self.pt.create(data,actor)
   if action=='cancelar':return self.pt.cancel(data,actor)
   if action=='onedrive/configurar':return self.cloud.configure(data,actor)
+  if action=='onedrive/probar-carpeta':return self.cloud.test_folder(actor)
   if action=='onedrive/conectar':return self.cloud.start_auth(actor)
   if action=='onedrive/verificar':return self.cloud.poll_auth(actor)
   if action=='onedrive/desconectar':return self.cloud.disconnect(actor)

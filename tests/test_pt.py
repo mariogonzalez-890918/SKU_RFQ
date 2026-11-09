@@ -1,5 +1,5 @@
 """PT con HTTP/SQLite real y publicación Microsoft simulada: alcance, precisión y reintentos."""
-import io,json,uuid,zipfile,concurrent.futures,sys,urllib.request,urllib.parse
+import io,json,uuid,zipfile,concurrent.futures,sys,urllib.request,urllib.parse,tempfile,pathlib,time,threading
 from unittest.mock import patch
 import test_commercial as fixture
 from pt_routes import PTAPI
@@ -133,6 +133,58 @@ class PTTests(fixture.CommercialTests):
   self.assertEqual(len(filename),4);self.assertTrue(any('PT_SAN_PABLO_2026-11.xlsx' in u for u in filename));self.assertTrue(any('PT_EJIDOS_2026-12.xlsx' in u for u in filename))
  def test_native_token_encryption_roundtrip(self):
   raw=b'test-token-only';encrypted=crypt(raw);self.assertNotEqual(raw,encrypted);self.assertEqual(crypt(encrypted,True),raw)
+
+ def folder_config(self,root):
+  state=self.value('/api/pt/onedrive');return {'revision':state['revision'],'modo':'carpeta','directorio':str(root),'cliente':'','cuenta':'soportetecnico@grupomipan.com','carpetas':{b:b.replace(' ','_') for b in ('EJIDOS','SAN PABLO','CUAUTITLAN')},'habilitado':True}
+ def test_folder_three_branches_month_files_cancellation_and_private_path(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'),patch('pt_onedrive.request',side_effect=AssertionError('No se debe llamar Microsoft')):
+   root=pathlib.Path(folder);state=self.value('/api/pt/onedrive/configurar',self.folder_config(root));self.assertTrue(state['conectado']);self.assertEqual(state['modo'],'carpeta')
+   entries=[]
+   with patch('pt.now',return_value='2026-11-30T23:59:59-06:00'):
+    for branch in ('EJIDOS','SAN PABLO','CUAUTITLAN'):entries.append(self.entry(sucursal=branch)['ingreso']);self.cloud.process_once()
+   self.assertEqual(len(list(root.rglob('*.xlsx'))),3)
+   self.value('/api/pt/cancelar',{'id':entries[0]['id'],'revision':1});self.cloud.process_once()
+   with zipfile.ZipFile(root/'EJIDOS/PT_EJIDOS_2026-11.xlsx') as archive:self.assertIn(b'CANCELADO',archive.read('xl/worksheets/sheet1.xml'));self.assertIn(b'<c r="I2"><v>0</v></c>',archive.read('xl/worksheets/sheet1.xml'))
+   with patch('pt.now',return_value='2026-12-01T00:00:01-06:00'):self.entry();self.cloud.process_once()
+   self.assertEqual(len(list(root.rglob('*.xlsx'))),4);self.assertTrue(all(j['estado']=='GUARDADO_EN_CARPETA' for j in self.value('/api/pt/onedrive')['publicaciones']))
+   pt=self.user();public=self.value('/api/pt/onedrive',actor=pt);self.assertNotIn(folder,json.dumps(public));self.assertNotIn('configuracion',public);self.assertEqual(self.call('/api/pt/onedrive/probar-carpeta',{},pt)[0],403)
+ def test_folder_unavailable_keeps_capture_then_retries_without_duplicate(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   root=pathlib.Path(folder)/'pc-apagada';self.value('/api/pt/onedrive/configurar',self.folder_config(root));self.entry();self.cloud.process_once();job=self.value('/api/pt/onedrive')['publicaciones'][0];self.assertTrue(job['pendiente']);self.assertIn('carpeta',job['error'])
+   root.mkdir();self.value('/api/pt/onedrive/publicar',{});self.cloud.process_once();self.assertFalse(self.value('/api/pt/onedrive')['publicaciones'][0]['pendiente']);self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),1);self.assertEqual(len(list(root.rglob('*.xlsx'))),1)
+ def test_folder_external_edit_and_destination_change_do_not_overwrite(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   root=pathlib.Path(folder);self.value('/api/pt/onedrive/configurar',self.folder_config(root));self.entry();self.cloud.process_once();target=next(root.rglob('*.xlsx'));target.write_bytes(b'edicion fuera de GMP');self.entry();self.cloud.process_once();self.assertEqual(target.read_bytes(),b'edicion fuera de GMP');self.assertTrue(self.value('/api/pt/onedrive')['publicaciones'][0]['pendiente'])
+   data=self.folder_config(root/'nuevo');self.assertEqual(self.call('/api/pt/onedrive/configurar',data)[0],400)
+ def test_folder_locked_file_leaves_previous_excel_intact_and_cleans_temp(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   root=pathlib.Path(folder);self.value('/api/pt/onedrive/configurar',self.folder_config(root));self.entry();self.cloud.process_once();target=next(root.rglob('*.xlsx'));previous=target.read_bytes();self.entry()
+   with patch('pt_folder.os.replace',side_effect=PermissionError('archivo abierto')):self.cloud.process_once()
+   self.assertEqual(target.read_bytes(),previous);self.assertFalse(list(root.rglob('*.tmp')));self.assertTrue(self.value('/api/pt/onedrive')['publicaciones'][0]['pendiente']);self.value('/api/pt/onedrive/publicar',{});self.cloud.process_once();self.assertFalse(self.value('/api/pt/onedrive')['publicaciones'][0]['pendiente'])
+ def test_folder_probe_is_async_and_does_not_confirm_cloud(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   self.value('/api/pt/onedrive/configurar',self.folder_config(folder));release=threading.Event()
+   def blocking(config):release.wait(4)
+   with patch('pt_onedrive.probe_folder',side_effect=blocking):
+    self.value('/api/pt/onedrive/probar-carpeta',{});self.assertEqual(self.value('/api/pt/onedrive')['configuracion']['pruebaCarpeta']['estado'],'PROBANDO');release.set()
+    for _ in range(50):
+     state=self.value('/api/pt/onedrive')['configuracion']['pruebaCarpeta']
+     if state['estado']!='PROBANDO':break
+     time.sleep(.02)
+    self.assertEqual(state['estado'],'CARPETA_VERIFICADA')
+   self.assertFalse(list(pathlib.Path(folder).iterdir()))
+ def test_folder_paths_and_config_permissions(self):
+  from pt_folder import validate_root,probe_folder,publish_folder
+  for value in ('carpeta','https://onedrive.live.com/carpeta',str(pathlib.Path.cwd().anchor),'C:\\data\\..\\otra','C:\\datos:alterno'):
+   with self.assertRaises(ValueError):validate_root(value)
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   data=self.folder_config(folder);pt=self.user();self.assertEqual(self.call('/api/pt/onedrive/configurar',data,pt)[0],403);data['carpetas']['EJIDOS']='CON';self.assertEqual(self.call('/api/pt/onedrive/configurar',data)[0],400);probe_folder({'directorio':folder});self.assertFalse(list(pathlib.Path(folder).iterdir()))
+ def test_folder_same_snapshot_recovery_without_replacing_existing_file(self):
+  from pt_folder import publish_folder
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   self.entry();_,config,_=self.cloud.read();config.update({'directorio':folder,'modo':'carpeta'});actor={'role':'superadmin','email':'test','modulos':['pt']};raw=self.pt.workbook(actor,{'sucursal':'EJIDOS'});first=publish_folder(config,'EJIDOS','2026-11',raw,{})
+   with patch('pt_folder.os.replace',side_effect=AssertionError('No debe reemplazar')):second=publish_folder(config,'EJIDOS','2026-11',raw,{})
+   self.assertEqual(first['firma'],second['firma']);self.assertEqual(len(list(pathlib.Path(folder).rglob('*.xlsx'))),1)
 
 for name in dir(fixture.CommercialTests):
  if name.startswith('test_') and name not in PTTests.__dict__:setattr(PTTests,name,None)

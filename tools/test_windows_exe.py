@@ -48,10 +48,16 @@ def verify(executable):
    status,raw,_=call('/api/pt/excel?sucursal=EJIDOS&mes='+entry['mes']);assert status==200
    with zipfile.ZipFile(io.BytesIO(raw)) as archive:assert archive.testzip() is None;assert sku.encode() in archive.read('xl/worksheets/sheet1.xml');assert 'xl/worksheets/sheet2.xml' in archive.namelist()
    status,photo_js,_=call('/pt.js');assert status==200 and b'decodePhoto' in photo_js and b'photoGallery' in photo_js
-   assert not value('/api/pt/onedrive')['conectado'];value('/api/pt/cancelar',{'id':entry['id'],'revision':1});stop();start();assert value('/api/pt/ingresos')['ingresos'][0]['estado']=='CANCELADO'
+   assert not value('/api/pt/onedrive')['conectado'];value('/api/pt/cancelar',{'id':entry['id'],'revision':1});export=folder/'publicaciones';export.mkdir();cloud=value('/api/pt/onedrive');value('/api/pt/onedrive/configurar',{'revision':cloud['revision'],'modo':'carpeta','directorio':str(export),'cliente':'','cuenta':'soportetecnico@grupomipan.com','carpetas':{b:b.replace(' ','_') for b in ('EJIDOS','SAN PABLO','CUAUTITLAN')},'habilitado':True})
+   for _ in range(100):
+    jobs=value('/api/pt/onedrive')['publicaciones']
+    if jobs and jobs[0]['estado']=='GUARDADO_EN_CARPETA':break
+    time.sleep(.1)
+   assert jobs[0]['estado']=='GUARDADO_EN_CARPETA',jobs;assert (export/'EJIDOS'/('PT_EJIDOS_'+entry['mes']+'.xlsx')).is_file()
+   stop();start();assert value('/api/pt/ingresos')['ingresos'][0]['estado']=='CANCELADO'
   except Exception:
    stop();log.flush();print((folder/'server.log').read_text(errors='replace')[-7000:]);raise
   finally:stop();log.close()
- print('PASS EXE Windows: versión, arranque, ingreso PT idempotente, PDF QR/Code128, SVG, lector, Excel mensual, cancelación y persistencia.')
+ print('PASS EXE Windows: versión, arranque, ingreso PT idempotente, PDF QR/Code128, SVG, lector, Excel mensual, carpeta sin Client ID, cancelación y persistencia.')
 
 if __name__=='__main__':verify(sys.argv[1])
