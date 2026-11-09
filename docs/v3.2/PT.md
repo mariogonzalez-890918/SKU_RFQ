@@ -42,3 +42,9 @@ En Etiquetas QR / barras, Dirección de GMP se rellena con la dirección actual 
 Abrir el QR sin sesión muestra el inicio de sesión y conserva el producto. No registra cantidades ni publica datos hasta confirmar el ingreso. Si hay una captura pendiente de confirmar, se verifica antes de abrir otro producto. HTTP permite abrir el enlace desde la cámara del teléfono; el video dentro del navegador sigue requiriendo HTTPS.
 
 El estado OneDrive NO conectado es explícito. La liga del libro de ejemplo no autoriza escritura ni lo convierte en destino. Se mantiene el esquema acordado de nuevos Excel mensuales por sucursal, después de completar la autorización Microsoft. No se ha validado una conexión real mientras esa autorización siga pendiente.
+
+## Lectura de fotos 3.2.2
+
+Se separan Tomar foto del código y Elegir foto o imagen. La lectura se realiza localmente, admite hasta 25 MB/40 megapíxeles y prueba orientación, resolución y recortes con límite de 20 segundos. Muestra la imagen seleccionada y el avance; se permite volver a elegir la misma foto. No se puede recuperar información perdida por desenfoque o barras reducidas a muy pocos píxeles. Los errores del maestro o del servidor se muestran por separado del fallo de lectura. Las fotos no se envían al servidor.
+
+Validado con la etiqueta facilitada por el usuario en fotos JPEG de 3000×4000, giros de 0/90/180/270 grados, código Code128 girado, foto vacía, reintento de la misma imagen y error de SKU inexistente. Leer una foto no genera ingresos.

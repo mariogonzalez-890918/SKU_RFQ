@@ -47,6 +47,7 @@ def verify(executable):
     status,raw,_=call(path);assert status==200 and raw.startswith(prefix),(path,status,raw[:100])
    status,raw,_=call('/api/pt/excel?sucursal=EJIDOS&mes='+entry['mes']);assert status==200
    with zipfile.ZipFile(io.BytesIO(raw)) as archive:assert archive.testzip() is None;assert sku.encode() in archive.read('xl/worksheets/sheet1.xml');assert 'xl/worksheets/sheet2.xml' in archive.namelist()
+   status,photo_js,_=call('/pt.js');assert status==200 and b'decodePhoto' in photo_js and b'photoGallery' in photo_js
    assert not value('/api/pt/onedrive')['conectado'];value('/api/pt/cancelar',{'id':entry['id'],'revision':1});stop();start();assert value('/api/pt/ingresos')['ingresos'][0]['estado']=='CANCELADO'
   except Exception:
    stop();log.flush();print((folder/'server.log').read_text(errors='replace')[-7000:]);raise
