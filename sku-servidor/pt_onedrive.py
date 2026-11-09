@@ -88,7 +88,7 @@ class OneDrivePT:
   if len(set(v.casefold() for v in normalized.values()))!=3:raise ValueError('Cada sucursal debe publicar en una carpeta diferente.')
   changed=client!=old['cliente'] or account!=old['cuenta'] or mode!=old.get('modo','microsoft');destination_changed=mode!=old.get('modo','microsoft') or directory!=old.get('directorio','') or normalized!=old['carpetas'];new={**old,'modo':mode,'directorio':directory,'cliente':client,'cuenta':account,'carpetas':normalized,'habilitado':data.get('habilitado') is True}
   if changed:new['conectado']=False
-  if destination_changed:new.pop('pruebaCarpeta',None)
+  if destination_changed or new.get('pruebaCarpeta',{}).get('estado')=='PROBANDO':new.pop('pruebaCarpeta',None)
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');current=db.execute('SELECT revision FROM pt_cloud').fetchone()[0]
    if current!=data.get('revision'):raise Conflict('La configuración cambió. Actualiza antes de guardar.')

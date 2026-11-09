@@ -173,6 +173,17 @@ class PTTests(fixture.CommercialTests):
      time.sleep(.02)
     self.assertEqual(state['estado'],'CARPETA_VERIFICADA')
    self.assertFalse(list(pathlib.Path(folder).iterdir()))
+ def test_folder_config_change_invalidates_inflight_probe_and_allows_retry(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   self.value('/api/pt/onedrive/configurar',self.folder_config(folder));release=threading.Event();completed=threading.Event()
+   def blocking(config):release.wait(4);completed.set()
+   with patch('pt_onedrive.probe_folder',side_effect=blocking):
+    self.value('/api/pt/onedrive/probar-carpeta',{});data=self.folder_config(folder);data['habilitado']=False;self.value('/api/pt/onedrive/configurar',data);self.assertNotIn('pruebaCarpeta',self.value('/api/pt/onedrive')['configuracion']);release.set();completed.wait(4);self.value('/api/pt/onedrive/probar-carpeta',{})
+    for _ in range(50):
+     state=self.value('/api/pt/onedrive')['configuracion'].get('pruebaCarpeta',{})
+     if state.get('estado')=='CARPETA_VERIFICADA':break
+     time.sleep(.02)
+    self.assertEqual(state['estado'],'CARPETA_VERIFICADA')
  def test_folder_paths_and_config_permissions(self):
   from pt_folder import validate_root,probe_folder,publish_folder
   for value in ('carpeta','https://onedrive.live.com/carpeta',str(pathlib.Path.cwd().anchor),'C:\\data\\..\\otra','C:\\datos:alterno'):
