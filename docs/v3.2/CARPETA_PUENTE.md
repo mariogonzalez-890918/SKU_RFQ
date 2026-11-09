@@ -1,4 +1,4 @@
-# Microsoft 365 Familia sin Client ID · GMP ERP 3.2.3
+# Microsoft 365 Familia sin Client ID · GMP ERP 3.2.4
 
 GMP genera los archivos de PT en una carpeta local o compartida. La aplicación OneDrive de una PC compatible sincroniza esa carpeta con la cuenta personal. No se necesita registrar una aplicación, obtener Client ID ni comprar Microsoft 365 empresarial para este modo.
 
@@ -28,13 +28,13 @@ Ejemplos dentro de la carpeta compartida:
 - `SAN_PABLO/PT_SAN_PABLO_2026-11.xlsx`
 - `CUAUTITLAN/PT_CUAUTITLAN_2026-11.xlsx`
 
-Cada archivo contiene detalle y resumen neto. Cambia de archivo al comenzar otro mes; las cancelaciones actualizan el mes original. No se modifica el libro compartido de ejemplo.
+Cada archivo nuevo contiene REGISTRO ENTRADA, con D producto, E cantidad y F UOM, una fila por captura. El detalle y resumen de consulta permanecen en GMP. Cambia de archivo al comenzar otro mes; las cancelaciones actualizan el mes original. Para usar un inventario mensual ya preparado y conservar sus otras pestañas, activa Usar libro de inventario preparado del mes y colócalo con el nombre indicado antes de publicar. Se valida el mes y se conserva el original para descargarlo desde Superadministrador. Los informes dinámicos pueden requerir Actualizar en Excel.
 
 ## Confirmación y problemas
 
 **GUARDADO_EN_CARPETA** significa que GMP guardó el Excel en el destino. OneDrive realiza la transferencia después: confirma su icono de sincronización y abre el archivo en OneDrive web. GMP no puede certificar la llegada a la nube mediante este modo.
 
-Si la PC está apagada, la red falla o Excel bloquea el archivo, las capturas siguen en GMP y la publicación queda pendiente. Hay reintentos automáticos; después de ocho fallos utiliza **Publicar pendientes ahora** cuando el destino esté disponible. Evita editar los archivos generados; las modificaciones externas se detectan y detienen la sustitución. Comparte las carpetas en OneDrive como solo lectura para quienes consultan. No se cambia de destino después de una publicación para evitar separar el histórico accidentalmente.
+Si la PC está apagada, la red falla o Excel bloquea el archivo, las capturas siguen en GMP y la publicación queda pendiente. Hay reintentos automáticos; después de ocho fallos utiliza **Publicar pendientes ahora** cuando el destino esté disponible. Evita editar los archivos generados; las modificaciones externas se detectan y detienen la sustitución. Comparte las carpetas en OneDrive como solo lectura para quienes consultan. No se cambia de carpeta dentro del mismo método después de publicar para evitar separar el histórico. Para migrar a Microsoft directo, desactiva la publicación automática, cambia de método, autoriza la cuenta y selecciona los libros; los archivos anteriores se conservan.
 
 La configuración de la ruta es exclusiva del Superadministrador. PT no recibe rutas del servidor, contraseñas ni configuración. Gerencia y AUXTI pueden revisar publicaciones y solicitar reintentos.
 

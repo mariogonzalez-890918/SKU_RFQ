@@ -54,6 +54,8 @@ def verify(executable):
     if jobs and jobs[0]['estado']=='GUARDADO_EN_CARPETA':break
     time.sleep(.1)
    assert jobs[0]['estado']=='GUARDADO_EN_CARPETA',jobs;assert (export/'EJIDOS'/('PT_EJIDOS_'+entry['mes']+'.xlsx')).is_file()
+   with zipfile.ZipFile(export/'EJIDOS'/('PT_EJIDOS_'+entry['mes']+'.xlsx')) as register:
+    assert b'REGISTRO ENTRADA' in register.read('xl/workbook.xml');xml=register.read('xl/worksheets/sheet1.xml');assert b'<c r="E2"><v>0</v></c>' in xml;assert sku.encode() not in xml
    stop();start();assert value('/api/pt/ingresos')['ingresos'][0]['estado']=='CANCELADO'
   except Exception:
    stop();log.flush();print((folder/'server.log').read_text(errors='replace')[-7000:]);raise

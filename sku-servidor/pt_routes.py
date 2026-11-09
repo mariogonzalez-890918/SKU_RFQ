@@ -25,7 +25,13 @@ class PTAPI:
    entry=json.loads(row[0]) if row else None
    if entry:pt.scope(actor,entry['sucursal'])
    return {'ingreso':entry}
+  if action=='onedrive/libro-original':
+   self.cloud.admin(actor);branch=q.get('sucursal');pt.scope(actor,branch)
+   with pt.store.connect() as db:row=db.execute('SELECT original FROM pt_original_workbooks WHERE branch=? AND month=?',(branch,q.get('mes'))).fetchone()
+   if not row:raise ValueError('No hay respaldo original para ese libro y mes.')
+   return row[0],MIME
   if action=='onedrive':return self.cloud.status(actor)
+  if action=='onedrive/archivos':return self.cloud.browse(actor,query)
   raise ValueError('Opción PT no encontrada.')
  def mutate(self,path,data,actor):
   self.pt.scope(actor);action=path.removeprefix('/api/pt/')
@@ -33,6 +39,7 @@ class PTAPI:
   if action=='cancelar':return self.pt.cancel(data,actor)
   if action=='onedrive/configurar':return self.cloud.configure(data,actor)
   if action=='onedrive/probar-carpeta':return self.cloud.test_folder(actor)
+  if action=='onedrive/seleccionar-archivo':return self.cloud.select_file(data,actor)
   if action=='onedrive/conectar':return self.cloud.start_auth(actor)
   if action=='onedrive/verificar':return self.cloud.poll_auth(actor)
   if action=='onedrive/desconectar':return self.cloud.disconnect(actor)

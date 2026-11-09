@@ -1,5 +1,6 @@
 """Entrega local/SMB de Excel PT; OneDrive de la PC puente realiza la sincronización."""
 import hashlib,io,os,pathlib,tempfile,zipfile
+from pt_registro import merge_workbook
 
 def validate_root(value):
  if not isinstance(value,str) or not value or len(value)>500 or any(ord(c)<32 for c in value):raise ValueError('Indica una carpeta absoluta del servidor o una ruta compartida de Windows.')
@@ -11,13 +12,13 @@ def workbook_hash(raw):
  if len(raw)>100*1024*1024:raise ValueError('El archivo supera el límite de publicación de 100 MB.')
  try:
   with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-   if sum(i.file_size for i in archive.infolist())>150*1024*1024:raise ValueError('El archivo existente es demasiado grande para validarlo.')
+   if sum(i.file_size for i in archive.infolist())>256*1024*1024:raise ValueError('El archivo existente es demasiado grande para validarlo.')
    digest=hashlib.sha256()
    for name in sorted(archive.namelist()):digest.update(name.encode()+b'\0'+archive.read(name))
    return digest.hexdigest()
  except zipfile.BadZipFile:raise ValueError('El archivo de destino no es un Excel válido. No se sobrescribió.')
 
-def publish_folder(config,branch,month,raw,old):
+def publish_folder(config,branch,month,raw,old,entries=None,backup=None):
  root=pathlib.Path(validate_root(config.get('directorio','')))
  if not root.is_dir():raise ValueError('La carpeta compartida no está disponible. Revisa que la PC puente esté encendida y que Windows tenga permiso de escritura.')
  root=root.resolve();parts=config['carpetas'][branch].split('/');parent=root
@@ -26,12 +27,19 @@ def publish_folder(config,branch,month,raw,old):
   if parent.exists() and not parent.resolve().is_relative_to(root):raise ValueError('La carpeta de la sucursal apunta fuera del destino autorizado.')
   parent.mkdir(exist_ok=True)
  if not parent.resolve().is_relative_to(root):raise ValueError('La carpeta de destino cambió. Revisa su configuración.')
- name='PT_'+branch.replace(' ','_')+'_'+month+'.xlsx';target=parent/name;signature=workbook_hash(raw)
+ name='PT_'+branch.replace(' ','_')+'_'+month+'.xlsx';target=parent/name
  def existing():
   if not target.exists():return None
   if target.is_symlink() or not target.resolve().is_relative_to(root):raise ValueError('El Excel de destino apunta fuera de la carpeta autorizada.')
   with target.open('rb') as handle:return workbook_hash(handle.read(100*1024*1024+1))
- previous=existing();result={'archivo':name,'modo':'carpeta','firma':signature}
+ previous=existing()
+ if config.get('libroExistente'):
+  if previous is None:raise ValueError('Prepara el libro mensual '+name+' en la carpeta de la sucursal. Debe tener REGISTRO ENTRADA, con D PRODUCTO, E CANTIDAD y F UOM.')
+  if old.get('firma') and previous!=old['firma']:raise ValueError('El libro cambió fuera de GMP. Revisa esa copia antes de reanudar; no se sobrescribió.')
+  original=target.read_bytes();raw=merge_workbook(original,entries or [],month)
+  if backup and not old.get('firma'):backup(original)
+ signature=workbook_hash(raw);result={'archivo':name,'modo':'carpeta','firma':signature}
+ if config.get('libroExistente') and not old.get('firma'):old={'firma':previous}
  if previous==signature:return result
  if previous and previous!=old.get('firma'):raise ValueError('El Excel fue modificado fuera de GMP o ya existía en el destino. Conserva esa copia y revisa el archivo; no se sobrescribió.')
  if previous is None and old.get('firma'):raise ValueError('El Excel publicado fue eliminado fuera de GMP. Restáuralo en la carpeta antes de reintentar.')

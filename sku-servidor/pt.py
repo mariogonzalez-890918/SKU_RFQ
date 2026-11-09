@@ -41,6 +41,7 @@ class PTStore:
   self.store=store;self.publisher=None
   with store.connect() as db:
    db.executescript('''CREATE TABLE IF NOT EXISTS pt_entries(id TEXT PRIMARY KEY,branch TEXT NOT NULL,month TEXT NOT NULL,creator TEXT NOT NULL,client_key TEXT NOT NULL,fingerprint TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(creator,client_key));
+CREATE TABLE IF NOT EXISTS pt_original_workbooks(branch TEXT NOT NULL,month TEXT NOT NULL,original BLOB NOT NULL,PRIMARY KEY(branch,month));
 CREATE INDEX IF NOT EXISTS pt_entries_scope ON pt_entries(branch,month);
 CREATE TABLE IF NOT EXISTS pt_exports(branch TEXT NOT NULL,month TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,synced INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'PENDIENTE',attempts INTEGER NOT NULL DEFAULT 0,retry_at REAL NOT NULL DEFAULT 0,lease REAL NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',payload TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(branch,month));
 CREATE TRIGGER IF NOT EXISTS pt_entries_no_delete BEFORE DELETE ON pt_entries BEGIN SELECT RAISE(ABORT,'El historial PT no se elimina.'); END;''')

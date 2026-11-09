@@ -92,7 +92,7 @@ class PTTests(fixture.CommercialTests):
  def test_cloud_publication_failure_pending_then_retry_full_snapshot_without_double_rows(self):
   with patch.object(OneDrivePT,'kick'):
    self.enable();self.entry();calls=[]
-   def publish(c,b,m,raw,old,token):
+   def publish(c,b,m,raw,old,token,*extra):
     with zipfile.ZipFile(io.BytesIO(raw)) as z:calls.append(z.read('xl/worksheets/sheet1.xml').count(b'<row'))
     if len(calls)==1:raise CloudError(503)
     return {'archivoId':'demo','etag':'v1','archivo':'PT_EJIDOS_'+m+'.xlsx','enlace':'https://onedrive.live.com/demo'}
@@ -144,7 +144,7 @@ class PTTests(fixture.CommercialTests):
     for branch in ('EJIDOS','SAN PABLO','CUAUTITLAN'):entries.append(self.entry(sucursal=branch)['ingreso']);self.cloud.process_once()
    self.assertEqual(len(list(root.rglob('*.xlsx'))),3)
    self.value('/api/pt/cancelar',{'id':entries[0]['id'],'revision':1});self.cloud.process_once()
-   with zipfile.ZipFile(root/'EJIDOS/PT_EJIDOS_2026-11.xlsx') as archive:self.assertIn(b'CANCELADO',archive.read('xl/worksheets/sheet1.xml'));self.assertIn(b'<c r="I2"><v>0</v></c>',archive.read('xl/worksheets/sheet1.xml'))
+   with zipfile.ZipFile(root/'EJIDOS/PT_EJIDOS_2026-11.xlsx') as archive:self.assertIn(b'REGISTRO ENTRADA',archive.read('xl/workbook.xml'));self.assertIn(b'<c r="E2"><v>0</v></c>',archive.read('xl/worksheets/sheet1.xml'))
    with patch('pt.now',return_value='2026-12-01T00:00:01-06:00'):self.entry();self.cloud.process_once()
    self.assertEqual(len(list(root.rglob('*.xlsx'))),4);self.assertTrue(all(j['estado']=='GUARDADO_EN_CARPETA' for j in self.value('/api/pt/onedrive')['publicaciones']))
    pt=self.user();public=self.value('/api/pt/onedrive',actor=pt);self.assertNotIn(folder,json.dumps(public));self.assertNotIn('configuracion',public);self.assertEqual(self.call('/api/pt/onedrive/probar-carpeta',{},pt)[0],403)
@@ -196,6 +196,86 @@ class PTTests(fixture.CommercialTests):
    self.entry();_,config,_=self.cloud.read();config.update({'directorio':folder,'modo':'carpeta'});actor={'role':'superadmin','email':'test','modulos':['pt']};raw=self.pt.workbook(actor,{'sucursal':'EJIDOS'});first=publish_folder(config,'EJIDOS','2026-11',raw,{})
    with patch('pt_folder.os.replace',side_effect=AssertionError('No debe reemplazar')):second=publish_folder(config,'EJIDOS','2026-11',raw,{})
    self.assertEqual(first['firma'],second['firma']);self.assertEqual(len(list(pathlib.Path(folder).rglob('*.xlsx'))),1)
+
+ def registry_entry(self,folio='LEGACY-1',quantity='2',state='REGISTRADO'):
+  return {'folio':folio,'sku':self.sku,'fecha':'2026-11-09T10:00:00-06:00','descripcion':'PRODUCTO DE PRUEBA','unidad':'PIEZA','cantidad':quantity,'estado':state}
+ def test_registry_export_has_one_row_per_capture_and_def_columns(self):
+  from pt_registro import new_workbook
+  entries=[self.registry_entry('PT-EJI-0000001','3'),self.registry_entry('PT-EJI-0000002','7')]
+  with zipfile.ZipFile(io.BytesIO(new_workbook(entries))) as z:
+   xml=z.read('xl/worksheets/sheet1.xml').decode();self.assertIn('REGISTRO ENTRADA',z.read('xl/workbook.xml').decode());self.assertIn('r="D1"',xml);self.assertIn('PRODUCTO',xml);self.assertIn('<c r="E2"><v>3</v></c>',xml);self.assertIn('<c r="E3"><v>7</v></c>',xml);self.assertNotIn(self.sku,xml)
+ def test_existing_registry_preserves_original_cells_and_retries_without_duplicate(self):
+  from pt_registro import new_workbook,merge_workbook
+  entry=self.registry_entry('PT-EJI-0000001','6');base=new_workbook([self.registry_entry()]);once=merge_workbook(base,[entry],'2026-11');twice=merge_workbook(once,[entry],'2026-11');cancelled=merge_workbook(twice,[{**entry,'estado':'CANCELADO'}],'2026-11')
+  with zipfile.ZipFile(io.BytesIO(base)) as a,zipfile.ZipFile(io.BytesIO(twice)) as b,zipfile.ZipFile(io.BytesIO(cancelled)) as c:
+   xml=b.read('xl/worksheets/sheet1.xml').decode();self.assertEqual(xml.count(entry['folio']),1);self.assertIn('<c r="E2"><v>2</v></c>',xml);self.assertIn('<c r="E3"><v>6</v></c>',xml);self.assertIn('<c r="E3"><v>0</v></c>',c.read('xl/worksheets/sheet1.xml').decode());self.assertEqual(a.read('xl/styles.xml'),b.read('xl/styles.xml'));self.assertEqual(a.read('xl/_rels/workbook.xml.rels'),b.read('xl/_rels/workbook.xml.rels'))
+ def test_registry_rejects_wrong_headers_month_or_folio_product(self):
+  from pt_registro import new_workbook,merge_workbook
+  base=new_workbook([self.registry_entry()]);entry=self.registry_entry('PT-EJI-0000001')
+  with self.assertRaisesRegex(ValueError,'otro mes'):merge_workbook(base,[entry],'2026-12')
+  with self.assertRaisesRegex(ValueError,'mismo producto'):merge_workbook(new_workbook([entry]),[{**entry,'descripcion':'OTRO'}],'2026-11')
+  bad=io.BytesIO()
+  with zipfile.ZipFile(io.BytesIO(base)) as src,zipfile.ZipFile(bad,'w') as dest:
+   for name in src.namelist():dest.writestr(name,src.read(name).replace(b'>UOM<',b'>CANTIDAD<') if name.endswith('sheet1.xml') else src.read(name))
+  with self.assertRaisesRegex(ValueError,'Encabezados'):merge_workbook(bad.getvalue(),[entry],'2026-11')
+ def test_registry_formula_translation_preserves_literals_and_merge_ranges(self):
+  from pt_registro import new_workbook,merge_workbook,shift_formula
+  self.assertEqual(shift_formula('IF($D2="A2",E2*2+$A$2+SUM(A2:A3),0)',3),'IF($D5="A2",E5*2+$A$2+SUM(A5:A6),0)')
+  base=new_workbook([self.registry_entry()]);out=io.BytesIO()
+  with zipfile.ZipFile(io.BytesIO(base)) as src,zipfile.ZipFile(out,'w') as dest:
+   for name in src.namelist():
+    raw=src.read(name)
+    if name.endswith('sheet1.xml'):raw=raw.replace(b'</row></sheetData>',b'<c r="H2"><f>E2*2</f><v>4</v></c></row></sheetData>').replace(b'</worksheet>',b'<mergeCells count="1"><mergeCell ref="H1:I1"/></mergeCells></worksheet>')
+    dest.writestr(name,raw)
+  updated=merge_workbook(out.getvalue(),[self.registry_entry('PT-EJI-0000001')],'2026-11')
+  with zipfile.ZipFile(io.BytesIO(updated)) as z:xml=z.read('xl/worksheets/sheet1.xml').decode();self.assertIn('ref="H1:I1"',xml);self.assertIn('<f>E3*2</f>',xml)
+ def test_existing_book_publication_has_original_backup_and_rejects_external_change(self):
+  from pt_registro import new_workbook
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   root=pathlib.Path(folder);target=root/'EJIDOS/PT_EJIDOS_2026-11.xlsx';target.parent.mkdir();base=new_workbook([self.registry_entry()]);target.write_bytes(base);data={**self.folder_config(root),'libroExistente':True};self.value('/api/pt/onedrive/configurar',data)
+   with patch('pt.now',return_value='2026-11-09T11:00:00-06:00'):entry=self.entry()['ingreso'];self.cloud.process_once()
+   self.assertFalse(self.value('/api/pt/onedrive')['publicaciones'][0]['pendiente']);status,backup,_=self.call('/api/pt/onedrive/libro-original?sucursal=EJIDOS&mes=2026-11');self.assertEqual(status,200);self.assertEqual(backup,base)
+   pt=self.user();self.assertEqual(self.call('/api/pt/onedrive/libro-original?sucursal=EJIDOS&mes=2026-11',actor=pt)[0],403);data=self.folder_config(root);data['libroExistente']=False;self.assertEqual(self.call('/api/pt/onedrive/configurar',data)[0],400)
+   self.value('/api/pt/cancelar',{'id':entry['id'],'revision':1});self.cloud.process_once()
+   with zipfile.ZipFile(target) as z:self.assertIn(b'<c r="E3"><v>0</v></c>',z.read('xl/worksheets/sheet1.xml'))
+   target.write_bytes(b'CAMBIO EXTERNO');self.entry();self.cloud.process_once();self.assertEqual(target.read_bytes(),b'CAMBIO EXTERNO')
+ def test_existing_book_missing_target_keeps_capture_pending(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   self.value('/api/pt/onedrive/configurar',{**self.folder_config(folder),'libroExistente':True});self.entry();self.cloud.process_once();state=self.value('/api/pt/onedrive')['publicaciones'][0];self.assertTrue(state['pendiente']);self.assertIn('Prepara el libro',state['error']);self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),1)
+
+ def test_drive_file_picker_is_root_only_and_filters_to_folders_and_xlsx(self):
+  pt=self.user()
+  with patch.object(OneDrivePT,'kick'):
+   self.enable()
+   def remote(url,**kwargs):return {'value':[{'id':'folder','name':'Inventarios','folder':{}},{'id':'book','name':'Entradas.xlsx','file':{}},{'id':'doc','name':'Otra.docx','file':{}}]}
+   with patch.object(self.cloud,'access_token',return_value='test'),patch('pt_onedrive.OneDrivePT.access_token',return_value='test'),patch('pt_onedrive.request',side_effect=remote):
+    rows=self.value('/api/pt/onedrive/archivos')['elementos'];self.assertEqual([x['id'] for x in rows],['folder','book']);self.assertEqual(self.call('/api/pt/onedrive/archivos',actor=pt)[0],403)
+ def test_drive_selected_book_is_updated_in_def_and_has_private_original_backup(self):
+  from pt_registro import new_workbook
+  pt=self.user();base=new_workbook([]);uploaded=[]
+  with patch.object(OneDrivePT,'kick'):
+   self.enable()
+   def remote(url,method='GET',data=None,token=None,headers=None,**kwargs):
+    if url.endswith('/createUploadSession'):
+     self.assertEqual(headers['If-Match'],'v1');return {'uploadUrl':'https://test.up.1drv.com/upload'}
+    if method=='PUT':uploaded.append(data);self.assertIsNone(token);return {'id':'book','eTag':'v2','webUrl':'https://onedrive.live.com/book'}
+    return {'id':'book','name':'Inventario.xlsx','file':{},'eTag':'v1','@microsoft.graph.downloadUrl':'https://test.files.1drv.com/source'}
+   with patch('pt_onedrive.OneDrivePT.access_token',return_value='test'),patch('pt_onedrive.request',side_effect=remote),patch('pt_onedrive.download_file',return_value=base):
+    state=self.value('/api/pt/onedrive');selected=self.value('/api/pt/onedrive/seleccionar-archivo',{'revision':state['revision'],'sucursal':'EJIDOS','mes':'2026-11','archivoId':'book'});self.assertEqual(selected['configuracion']['archivosPorSucursal']['EJIDOS']['2026-11']['id'],'book')
+    with patch('pt.now',return_value='2026-11-09T12:00:00-06:00'):entry=self.entry()['ingreso'];self.cloud.process_once()
+    self.assertEqual(len(uploaded),1)
+    with zipfile.ZipFile(io.BytesIO(uploaded[0])) as z:xml=z.read('xl/worksheets/sheet1.xml').decode();self.assertIn('PRODUCTO DE PRUEBA',xml);self.assertIn('<c r="E2"><v>3</v></c>',xml);self.assertNotIn(self.sku,xml)
+    self.assertEqual(self.call('/api/pt/onedrive/libro-original?sucursal=EJIDOS&mes=2026-11')[1],base);self.assertEqual(self.call('/api/pt/onedrive/libro-original?sucursal=EJIDOS&mes=2026-11',actor=pt)[0],403)
+    state=self.value('/api/pt/onedrive');self.assertEqual(self.call('/api/pt/onedrive/seleccionar-archivo',{'revision':state['revision'],'sucursal':'SAN PABLO','mes':'2026-11','archivoId':'book'})[0],400)
+    self.value('/api/pt/cancelar',{'id':entry['id'],'revision':1});self.cloud.process_once();self.assertEqual(len(uploaded),1);self.assertIn('cambió',self.value('/api/pt/onedrive')['publicaciones'][0]['error'])
+ def test_drive_download_rejects_non_microsoft_or_insecure_destinations(self):
+  from pt_onedrive import download_file
+  for url in ('http://test.files.1drv.com/a','https://example.test/a','https://user:pass@test.files.1drv.com/a','https://127.0.0.1/a'):
+   with self.assertRaises(ValueError):download_file(url)
+
+ def test_provider_switch_preserves_existing_files_and_requires_explicit_selection(self):
+  with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
+   self.value('/api/pt/onedrive/configurar',self.folder_config(folder));self.entry();self.cloud.process_once();target=next(pathlib.Path(folder).rglob('*.xlsx'));previous=target.read_bytes();state=self.value('/api/pt/onedrive');data={'revision':state['revision'],'modo':'microsoft','cliente':'11111111-1111-1111-1111-111111111111','cuenta':'soportetecnico@grupomipan.com','carpetas':{b:b.replace(' ','_') for b in ('EJIDOS','SAN PABLO','CUAUTITLAN')},'habilitado':True};self.assertEqual(self.call('/api/pt/onedrive/configurar',data)[0],400);data['habilitado']=False;result=self.value('/api/pt/onedrive/configurar',data);self.assertFalse(result['conectado']);self.assertTrue(result['configuracion']['seleccionarLibros']);self.assertEqual(target.read_bytes(),previous);self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),1)
 
 for name in dir(fixture.CommercialTests):
  if name.startswith('test_') and name not in PTTests.__dict__:setattr(PTTests,name,None)

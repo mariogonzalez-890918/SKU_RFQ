@@ -1,6 +1,7 @@
 """Publicación serializada de Excel PT en OneDrive personal; tokens privados con DPAPI."""
 import base64,ctypes,ctypes.wintypes,json,re,threading,time,urllib.request,urllib.error,urllib.parse
 from pt_folder import validate_root,publish_folder,probe_folder
+from pt_registro import new_workbook,merge_workbook
 from pt import BRANCHES,MANAGERS
 from comercial import dumps
 from requisiciones import Conflict,now,text
@@ -43,6 +44,21 @@ def upload_url(url):
  p=urllib.parse.urlsplit(url);host=p.hostname or ''
  return p.scheme=='https' and not p.username and any(host.endswith(s) for s in ('.1drv.com','.sharepoint.com','.onedrive.com'))
 
+def download_file(url):
+ for _ in range(5):
+  p=urllib.parse.urlsplit(url);host=p.hostname or ''
+  if p.scheme!='https' or p.username or not any(host.endswith(s) for s in ('.1drv.com','.sharepoint.com','.onedrive.com','.storage.live.com','.livefilestore.com')):raise ValueError('Microsoft devolvió un destino de descarga no válido.')
+  try:
+   with urllib.request.build_opener(NoRedirect()).open(urllib.request.Request(url),timeout=25) as response:
+    raw=response.read(100*1024*1024+1)
+    if len(raw)>100*1024*1024:raise ValueError('El libro supera 100 MB.')
+    return raw
+  except urllib.error.HTTPError as error:
+   if error.code in (301,302,303,307,308):url=urllib.parse.urljoin(url,error.headers.get('Location',''));continue
+   raise CloudError(error.code)
+  except OSError:raise CloudError('sin conexión')
+ raise ValueError('Microsoft no completó la descarga del libro.')
+
 class OneDrivePT:
  def __init__(self,pt):
   self.pt=pt;self.store=pt.store;pt.publisher=self;self.worker_lock=threading.Lock();self.auth_lock=threading.Lock();self.destination_lock=threading.Lock()
@@ -62,6 +78,9 @@ class OneDrivePT:
   with self.store.connect() as db:
    jobs=[{'sucursal':b,'mes':m,'pendiente':r>s,'estado':state,'error':error if actor['role'] in MANAGERS else '',**({k:v for k,v in json.loads(payload).items() if k in ('archivo','enlace','publicado')} if actor['role'] in MANAGERS else {})} for b,m,r,s,state,error,payload in db.execute('SELECT branch,month,revision,synced,state,error,payload FROM pt_exports ORDER BY month DESC,branch') if b in allowed]
   result={'modo':config.get('modo','microsoft'),'conectado':self.ready(config),'habilitado':config.get('habilitado',False),'publicaciones':jobs[:36]}
+  if actor['role']=='superadmin':
+   with self.store.connect() as db:originals=set(db.execute('SELECT branch,month FROM pt_original_workbooks'))
+   for job in jobs:job['respaldoOriginal']=(job['sucursal'],job['mes']) in originals
   if actor['role']=='superadmin':result.update({'revision':revision,'configuracion':config})
   return result
  def ready(self,config):return bool(config.get('directorio')) if config.get('modo')=='carpeta' else bool(config.get('conectado'))
@@ -86,14 +105,20 @@ class OneDrivePT:
    if not normalized[b]:raise ValueError('Indica una carpeta para cada sucursal.')
    if mode=='carpeta' and any(v.strip()!=v or re.fullmatch(r'(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])',v,re.I) for v in normalized[b].split('/')):raise ValueError('La carpeta contiene un nombre no válido para Windows.')
   if len(set(v.casefold() for v in normalized.values()))!=3:raise ValueError('Cada sucursal debe publicar en una carpeta diferente.')
-  changed=client!=old['cliente'] or account!=old['cuenta'] or mode!=old.get('modo','microsoft');destination_changed=mode!=old.get('modo','microsoft') or directory!=old.get('directorio','') or normalized!=old['carpetas'];new={**old,'modo':mode,'directorio':directory,'cliente':client,'cuenta':account,'carpetas':normalized,'habilitado':data.get('habilitado') is True}
+  method_changed=mode!=old.get('modo','microsoft')
+  with self.store.connect() as db:was_published=bool(db.execute('SELECT 1 FROM pt_exports WHERE synced>0').fetchone())
+  if method_changed and was_published and data.get('habilitado') is True:raise ValueError('Desactiva la publicación automática antes de cambiar el método. Los archivos actuales se conservarán.')
+  changed=client!=old['cliente'] or account!=old['cuenta'] or mode!=old.get('modo','microsoft');destination_changed=mode!=old.get('modo','microsoft') or directory!=old.get('directorio','') or normalized!=old['carpetas'];new={**old,'libroExistente':data.get('libroExistente',old.get('libroExistente',False)) is True,'modo':mode,'directorio':directory,'cliente':client,'cuenta':account,'carpetas':normalized,'habilitado':data.get('habilitado') is True}
+  if method_changed and mode=='microsoft':new['seleccionarLibros']=True;new['archivosPorSucursal']={}
+  if mode=='microsoft' and new['libroExistente']:raise ValueError('Para conservar un libro existente utiliza carpeta sincronizada / PC puente.')
   if changed:new['conectado']=False
   if destination_changed or new.get('pruebaCarpeta',{}).get('estado')=='PROBANDO':new.pop('pruebaCarpeta',None)
   with self.store.connect() as db:
    db.execute('BEGIN IMMEDIATE');current=db.execute('SELECT revision FROM pt_cloud').fetchone()[0]
    if current!=data.get('revision'):raise Conflict('La configuración cambió. Actualiza antes de guardar.')
+   if not method_changed and old.get('libroExistente') and not new['libroExistente'] and db.execute('SELECT 1 FROM pt_exports WHERE synced>0').fetchone():raise ValueError('No desactives el libro existente después de publicar: sus demás pestañas deben conservarse.')
    # No mover archivos ya publicados a otro destino por accidente.
-   if destination_changed and db.execute('SELECT 1 FROM pt_exports WHERE synced>0').fetchone():raise ValueError('Hay archivos publicados. Conserva el mismo modo y destino para mantener el historial mensual.')
+   if destination_changed and not method_changed and db.execute('SELECT 1 FROM pt_exports WHERE synced>0').fetchone():raise ValueError('Hay archivos publicados. Conserva el mismo modo y destino para mantener el historial mensual.')
    db.execute('UPDATE pt_cloud SET revision=revision+1,payload=?,secret=CASE WHEN ? THEN ? ELSE secret END WHERE id=1',(dumps(new),changed,''))
   return self.status(actor)
  def test_folder(self,actor):
@@ -110,6 +135,38 @@ class OneDrivePT:
    try:probe_folder(config);record('CARPETA_VERIFICADA')
    except Exception as error:record('ERROR',str(error) if isinstance(error,ValueError) else 'No se pudo abrir la carpeta compartida. Revisa permisos y conexión con la PC puente.')
   threading.Thread(target=run,daemon=True,name='PT-Carpeta-Prueba').start();return {'ok':True,'mensaje':'Prueba iniciada. Consulta el estado; esto no confirma sincronización en la nube.'}
+ def browse(self,actor,query):
+  self.admin(actor);_,config,_=self.read()
+  if config.get('modo','microsoft')!='microsoft' or not config.get('conectado'):raise ValueError('Primero guarda el modo Microsoft y autoriza tu cuenta. El selector directo necesita esa conexión.')
+  parent=query.get('carpeta',['root'])[0];url=GRAPH+'/me/drive/'+('root' if parent=='root' else 'items/'+urllib.parse.quote(parent,safe=''))+'/children?$select=id,name,folder,file&$top=200'
+  next_url=query.get('pagina',[''])[0]
+  if next_url:
+   if not next_url.startswith(GRAPH+'/') or urllib.parse.urlsplit(next_url).hostname!='graph.microsoft.com':raise ValueError('Página de archivos no válida.')
+   url=next_url
+  data=request(url,token=self.access_token());items=[{'id':x['id'],'nombre':x.get('name',''),'carpeta':'folder' in x} for x in data.get('value',[]) if 'folder' in x or x.get('name','').lower().endswith('.xlsx')]
+  return {'elementos':items,'siguiente':data.get('@odata.nextLink','')}
+ def select_file(self,data,actor):
+  self.admin(actor);branch=data.get('sucursal');self.pt.scope(actor,branch);month=data.get('mes','');id=text(data.get('archivoId',''),300)
+  if branch not in BRANCHES or not re.fullmatch(r'20\d\d-(0[1-9]|1[0-2])',month) or not id:raise ValueError('Selecciona sucursal, mes y archivo Excel.')
+  if not self.destination_lock.acquire(False):raise Conflict('Hay una publicación en curso. Espera antes de cambiar el archivo.')
+  try:
+   revision,config,_=self.read()
+   if revision!=data.get('revision'):raise Conflict('La configuración cambió. Actualiza antes de seleccionar el archivo.')
+   if config.get('modo','microsoft')!='microsoft' or not config.get('conectado'):raise ValueError('Autoriza primero la cuenta Microsoft en el aplicativo.')
+   item=request(GRAPH+'/me/drive/items/'+urllib.parse.quote(id,safe=''),token=self.access_token())
+   if 'file' not in item or not item.get('name','').lower().endswith('.xlsx'):raise ValueError('Selecciona un libro .xlsx de tu OneDrive.')
+   raw=download_file(item.get('@microsoft.graph.downloadUrl',''));merge_workbook(raw,[],month)
+   with self.store.connect() as db:
+    db.execute('BEGIN IMMEDIATE');current=db.execute('SELECT revision,payload FROM pt_cloud WHERE id=1').fetchone()
+    if current[0]!=revision:raise Conflict('La conexión cambió. Actualiza y selecciona de nuevo.')
+    config=json.loads(current[1]);job=db.execute('SELECT synced,payload FROM pt_exports WHERE branch=? AND month=?',(branch,month)).fetchone()
+    if job and job[0]>0 and json.loads(job[1]).get('modo')!='carpeta' and json.loads(job[1]).get('archivoId')!=id:raise ValueError('Ese mes ya fue publicado en otro archivo. Conserva el destino para no separar el histórico.')
+    config['seleccionarLibros']=True;selected=config.setdefault('archivosPorSucursal',{}).setdefault(branch,{})
+    if any(v.get('id')==id for b,months in config['archivosPorSucursal'].items() for m,v in months.items() if b!=branch or m!=month):raise ValueError('Cada sucursal y mes debe usar su propio archivo.')
+    selected[month]={'id':id,'nombre':item['name']};db.execute('UPDATE pt_cloud SET revision=revision+1,payload=? WHERE id=1',(dumps(config),))
+    if db.execute('SELECT 1 FROM pt_entries WHERE branch=? AND month=?',(branch,month)).fetchone():self.pt.queued(db,branch,month)
+  finally:self.destination_lock.release()
+  self.kick();return self.status(actor)
  def start_auth(self,actor):
   self.admin(actor);_,config,_=self.read()
   if config.get('modo')=='carpeta':raise ValueError('En modo carpeta no necesitas Client ID ni autorización de Microsoft dentro de GMP.')
@@ -183,14 +240,25 @@ class OneDrivePT:
    if not job:return False
    branch,month,revision,_,payload=job;db.execute("UPDATE pt_exports SET lease=?,state='PUBLICANDO' WHERE branch=? AND month=?",(time.time()+240,branch,month))
   try:
-   actor={'role':'superadmin','email':'publicador-pt','modulos':['pt']};raw=self.pt.workbook(actor,{'sucursal':branch,'mes':month});remote=publish_folder(config,branch,month,raw,json.loads(payload)) if config.get('modo')=='carpeta' else self.publish_file(config,branch,month,raw,json.loads(payload),self.access_token())
+   actor={'role':'superadmin','email':'publicador-pt','modulos':['pt']};entries=list(reversed(self.pt.entries(actor,{'sucursal':branch,'mes':month})['ingresos']));raw=new_workbook(entries)
+   def backup(original):
+    with self.store.connect() as db:db.execute('INSERT OR IGNORE INTO pt_original_workbooks VALUES(?,?,?)',(branch,month,original))
+   remote=publish_folder(config,branch,month,raw,json.loads(payload),entries,backup) if config.get('modo')=='carpeta' else self.publish_file(config,branch,month,raw,json.loads(payload),self.access_token(),entries,backup)
    with self.store.connect() as db:db.execute("UPDATE pt_exports SET synced=?,state=CASE WHEN revision>? THEN 'PENDIENTE' ELSE ? END,lease=0,error='',attempts=0,retry_at=0,payload=? WHERE branch=? AND month=?",(revision,revision,'GUARDADO_EN_CARPETA' if config.get('modo')=='carpeta' else 'PUBLICADO',dumps({**remote,'publicado':now()}),branch,month))
   except Exception as error:
    # Nunca guardar respuestas crudas, URLs de carga ni tokens dentro del estado público.
    message=str(error) if isinstance(error,(CloudError,ValueError)) else ('No se pudo guardar en la carpeta. Revisa la PC puente, los permisos de Windows y que Excel esté cerrado.' if config.get('modo')=='carpeta' else 'No se pudo publicar. Reintenta la conexión con Microsoft.')
    with self.store.connect() as db:db.execute("UPDATE pt_exports SET state='PENDIENTE',lease=0,error=?,retry_at=?,attempts=attempts+1 WHERE branch=? AND month=?",(message[:300],time.time()+60,branch,month))
   return True
- def publish_file(self,config,branch,month,raw,old,token):
+ def publish_file(self,config,branch,month,raw,old,token,entries=None,backup=None):
+  selected=config.get('archivosPorSucursal',{}).get(branch,{}).get(month)
+  if config.get('seleccionarLibros') and not selected:raise ValueError('Selecciona el libro de '+branch+' para el mes '+month+' desde Superadministrador.')
+  if selected:
+   id=selected['id'];current=request(GRAPH+'/me/drive/items/'+urllib.parse.quote(id,safe=''),token=token)
+   if old.get('archivoId') and (old['archivoId']!=id or current.get('eTag')!=old.get('etag')):raise ValueError('El libro cambió fuera de GMP. Revisa esa copia antes de publicar.')
+   original=download_file(current.get('@microsoft.graph.downloadUrl',''));raw=merge_workbook(original,entries or [],month)
+   if backup and not old.get('archivoId'):backup(original)
+   return self.upload_file(GRAPH+'/me/drive/items/'+urllib.parse.quote(id,safe='')+'/createUploadSession',raw,current.get('name',selected['nombre']),token,{'If-Match':current['eTag']},True)
   folder=config['carpetas'][branch];path='';parent='root'
   for part in folder.split('/'):
    path+='/'+part
@@ -206,7 +274,9 @@ class OneDrivePT:
    if current.get('eTag')!=old.get('etag'):raise ValueError('El Excel fue modificado fuera de GMP. Conserva esa copia y revisa el archivo antes de reanudar la publicación.')
    url=GRAPH+'/me/drive/items/'+urllib.parse.quote(old['archivoId'],safe='')+'/createUploadSession';headers['If-Match']=old['etag']
   else:url=GRAPH+'/me/drive/items/'+urllib.parse.quote(parent,safe='')+':/'+urllib.parse.quote(name,safe='')+':/createUploadSession'
-  session=request(url,'POST',{'item':{'@microsoft.graph.conflictBehavior':'replace' if old.get('archivoId') else 'fail'}},token,headers);upload=session.get('uploadUrl','')
+  return self.upload_file(url,raw,name,token,headers,bool(old.get('archivoId')))
+ def upload_file(self,url,raw,name,token,headers,replace):
+  session=request(url,'POST',{'item':{'@microsoft.graph.conflictBehavior':'replace' if replace else 'fail'}},token,headers);upload=session.get('uploadUrl','')
   if not upload_url(upload):raise ValueError('Microsoft devolvió un destino de carga no válido.')
   result={};size=len(raw)
   for offset in range(0,size,3276800):

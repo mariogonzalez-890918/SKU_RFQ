@@ -52,3 +52,17 @@ Validado con la etiqueta facilitada por el usuario en fotos JPEG de 3000×4000, 
 ## Alternativa Familia sin Client ID — 3.2.3
 
 Se agregó publicación en carpeta local/SMB de una PC Windows compatible con OneDrive. Consulta [Configuración de PC puente](CARPETA_PUENTE.md). El modo Microsoft Graph anterior sigue disponible. La cuenta Microsoft solo se inicia en OneDrive en la PC puente; GMP no solicita su contraseña. El guardado en carpeta y la sincronización en la nube son estados distintos.
+
+## REGISTRO ENTRADA y selección de libros — 3.2.4
+
+Se sigue la última confirmación del usuario: D PRODUCTO, E CANTIDAD y F UOM. El SKU se detecta y valida en GMP, no se sustituye el producto por el código en D. Cada captura agrega una fila con ID, fecha/hora del servidor y folio; no se acumulan capturas en la misma fila. Reintentar conserva la fila del folio; cancelar la deja con cantidad cero. El historial de GMP conserva el SKU y el estado. La descarga personal de historial sigue separada del libro de inventario completo.
+
+En modo carpeta, activa Usar libro de inventario preparado del mes para conservar otras pestañas. Coloca el archivo mensual PT_EJIDOS_2026-11.xlsx (o la sucursal/mes que corresponda) dentro de su carpeta. Si falta, la publicación queda pendiente. El libro debe contener REGISTRO ENTRADA o registro_entrada y los encabezados D PRODUCTO, E CANTIDAD, F UOM. Se validan mes, folios y producto/unidad; si existe PRODUCTOS se busca una coincidencia única por SKU o descripción exacta. No se convierten unidades diferentes. Se guarda el original en la base de GMP antes de la primera modificación; solo Superadministrador puede descargarlo desde publicaciones.
+
+Sin esa opción, GMP crea un libro nuevo con REGISTRO ENTRADA y esas seis columnas iniciales. Nunca adopta un archivo ajeno sin la opción de libro existente. Se conserva la protección contra cambios externos. Después de publicar un libro existente no se puede desactivar esa opción, porque reemplazarlo por un libro nuevo perdería sus otras pestañas.
+
+En modo Microsoft Graph, el Superadministrador autoriza la cuenta Microsoft mediante el flujo existente y abre Elegir archivo de cada sucursal. Puede navegar carpetas, listar libros .xlsx y seleccionar uno por mes/sucursal. Se valida el registro antes de vincularlo. Un mismo archivo no puede asignarse a dos sucursales/meses; después de publicar no se cambia a otro destino. Activar publicación automática después de asignar las tres sucursales. Al comenzar otro mes debe seleccionarse su nuevo libro. Esta conexión directa necesita un Client ID de aplicación registrada una vez; Microsoft 365 Familia puede autorizarla, pero actualizar el EXE no crea esa autorización. La opción carpeta/PC puente sigue sin requerir Client ID.
+
+La escritura conserva las otras partes del archivo, sus estilos y fórmulas. Se amplían los orígenes de tablas afectados y se solicita recálculo/actualización al abrir. Los informes basados en tablas dinámicas pueden requerir Actualizar en Excel: no se ejecuta Excel ni se garantiza recálculo nativo en el servidor. No se deben considerar las cachés de informes como actualización ya realizada. No se cambiaron los inventarios originales de Descargas.
+
+Si ya había publicaciones por carpeta y se cambia a Microsoft, se desactiva primero la publicación automática, se autoriza la cuenta y se seleccionan los libros del mes. Los archivos anteriores y las capturas se conservan. Cambiar de método no traslada ni elimina archivos por sí solo.
