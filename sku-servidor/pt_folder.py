@@ -32,14 +32,13 @@ def publish_folder(config,branch,month,raw,old,entries=None,backup=None):
   if not target.exists():return None
   if target.is_symlink() or not target.resolve().is_relative_to(root):raise ValueError('El Excel de destino apunta fuera de la carpeta autorizada.')
   with target.open('rb') as handle:return workbook_hash(handle.read(100*1024*1024+1))
- previous=existing()
- if config.get('libroExistente'):
+ previous=existing();owned=old.get('cantidades') if old.get('modo')=='carpeta' else None
+ if config.get('libroExistente') or (previous is not None and owned):
   if previous is None:raise ValueError('Prepara el libro mensual '+name+' en la carpeta de la sucursal. Debe tener REGISTRO ENTRADA, con D PRODUCTO, E CANTIDAD y F UOM.')
-  if old.get('firma') and previous!=old['firma']:raise ValueError('El libro cambió fuera de GMP. Revisa esa copia antes de reanudar; no se sobrescribió.')
-  original=target.read_bytes();raw=merge_workbook(original,entries or [],month)
-  if backup and not old.get('firma'):backup(original)
+  original=target.read_bytes();raw=merge_workbook(original,entries or [],month,owned)
+  if backup and not owned:backup(original)
  signature=workbook_hash(raw);result={'archivo':name,'modo':'carpeta','firma':signature}
- if config.get('libroExistente') and not old.get('firma'):old={'firma':previous}
+ if config.get('libroExistente') or owned:old={**old,'firma':previous}
  if previous==signature:return result
  if previous and previous!=old.get('firma'):raise ValueError('El Excel fue modificado fuera de GMP o ya existía en el destino. Conserva esa copia y revisa el archivo; no se sobrescribió.')
  if previous is None and old.get('firma'):raise ValueError('El Excel publicado fue eliminado fuera de GMP. Restáuralo en la carpeta antes de reintentar.')

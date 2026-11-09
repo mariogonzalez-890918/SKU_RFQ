@@ -260,14 +260,15 @@ class PTTests(fixture.CommercialTests):
      self.assertEqual(headers['If-Match'],'v1');return {'uploadUrl':'https://test.up.1drv.com/upload'}
     if method=='PUT':uploaded.append(data);self.assertIsNone(token);return {'id':'book','eTag':'v2','webUrl':'https://onedrive.live.com/book'}
     return {'id':'book','name':'Inventario.xlsx','file':{},'eTag':'v1','@microsoft.graph.downloadUrl':'https://test.files.1drv.com/source'}
-   with patch('pt_onedrive.OneDrivePT.access_token',return_value='test'),patch('pt_onedrive.request',side_effect=remote),patch('pt_onedrive.download_file',return_value=base):
+   with patch('pt_onedrive.OneDrivePT.access_token',return_value='test'),patch('pt_onedrive.request',side_effect=remote),patch('pt_onedrive.download_file',side_effect=lambda url:uploaded[-1] if uploaded else base):
     state=self.value('/api/pt/onedrive');selected=self.value('/api/pt/onedrive/seleccionar-archivo',{'revision':state['revision'],'sucursal':'EJIDOS','mes':'2026-11','archivoId':'book'});self.assertEqual(selected['configuracion']['archivosPorSucursal']['EJIDOS']['2026-11']['id'],'book')
     with patch('pt.now',return_value='2026-11-09T12:00:00-06:00'):entry=self.entry()['ingreso'];self.cloud.process_once()
     self.assertEqual(len(uploaded),1)
     with zipfile.ZipFile(io.BytesIO(uploaded[0])) as z:xml=z.read('xl/worksheets/sheet1.xml').decode();self.assertIn('PRODUCTO DE PRUEBA',xml);self.assertIn('<c r="E2"><v>3</v></c>',xml);self.assertNotIn(self.sku,xml)
     self.assertEqual(self.call('/api/pt/onedrive/libro-original?sucursal=EJIDOS&mes=2026-11')[1],base);self.assertEqual(self.call('/api/pt/onedrive/libro-original?sucursal=EJIDOS&mes=2026-11',actor=pt)[0],403)
     state=self.value('/api/pt/onedrive');self.assertEqual(self.call('/api/pt/onedrive/seleccionar-archivo',{'revision':state['revision'],'sucursal':'SAN PABLO','mes':'2026-11','archivoId':'book'})[0],400)
-    self.value('/api/pt/cancelar',{'id':entry['id'],'revision':1});self.cloud.process_once();self.assertEqual(len(uploaded),1);self.assertIn('cambió',self.value('/api/pt/onedrive')['publicaciones'][0]['error'])
+    self.value('/api/pt/cancelar',{'id':entry['id'],'revision':1});self.cloud.process_once();self.assertEqual(len(uploaded),2)
+    with zipfile.ZipFile(io.BytesIO(uploaded[-1])) as z:self.assertIn(b'<c r="E2"><v>0</v></c>',z.read('xl/worksheets/sheet1.xml'))
  def test_drive_download_rejects_non_microsoft_or_insecure_destinations(self):
   from pt_onedrive import download_file
   for url in ('http://test.files.1drv.com/a','https://example.test/a','https://user:pass@test.files.1drv.com/a','https://127.0.0.1/a'):
@@ -276,6 +277,33 @@ class PTTests(fixture.CommercialTests):
  def test_provider_switch_preserves_existing_files_and_requires_explicit_selection(self):
   with tempfile.TemporaryDirectory() as folder,patch.object(OneDrivePT,'kick'):
    self.value('/api/pt/onedrive/configurar',self.folder_config(folder));self.entry();self.cloud.process_once();target=next(pathlib.Path(folder).rglob('*.xlsx'));previous=target.read_bytes();state=self.value('/api/pt/onedrive');data={'revision':state['revision'],'modo':'microsoft','cliente':'11111111-1111-1111-1111-111111111111','cuenta':'soportetecnico@grupomipan.com','carpetas':{b:b.replace(' ','_') for b in ('EJIDOS','SAN PABLO','CUAUTITLAN')},'habilitado':True};self.assertEqual(self.call('/api/pt/onedrive/configurar',data)[0],400);data['habilitado']=False;result=self.value('/api/pt/onedrive/configurar',data);self.assertFalse(result['conectado']);self.assertTrue(result['configuracion']['seleccionarLibros']);self.assertEqual(target.read_bytes(),previous);self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),1)
+
+ def test_registry_accepts_recalculated_caches_but_rejects_edited_gmp_quantity(self):
+  from pt_registro import new_workbook,merge_workbook
+  entry=self.registry_entry('PT-EJI-0000001','3');base=new_workbook([entry]);out=io.BytesIO()
+  with zipfile.ZipFile(io.BytesIO(base)) as src,zipfile.ZipFile(out,'w') as dest:
+   for name in src.namelist():dest.writestr(name,src.read(name))
+   dest.writestr('docProps/test-autosave.xml','<modified>Excel recalculated</modified>')
+  later=self.registry_entry('PT-EJI-0000002','4');expected={entry['folio']:'3'};merged=merge_workbook(out.getvalue(),[entry,later],'2026-11',expected)
+  with zipfile.ZipFile(io.BytesIO(merged)) as z:self.assertIn('docProps/test-autosave.xml',z.namelist());self.assertEqual(z.read('xl/worksheets/sheet1.xml').count(entry['folio'].encode()),1)
+  bad=io.BytesIO()
+  with zipfile.ZipFile(io.BytesIO(base)) as src,zipfile.ZipFile(bad,'w') as dest:
+   for name in src.namelist():dest.writestr(name,src.read(name).replace(b'<c r="E2"><v>3</v></c>',b'<c r="E2"><v>99</v></c>') if name.endswith('sheet1.xml') else src.read(name))
+  with self.assertRaisesRegex(ValueError,'modificada fuera'):merge_workbook(bad.getvalue(),[entry,later],'2026-11',expected)
+  textqty=io.BytesIO()
+  with zipfile.ZipFile(io.BytesIO(base)) as src,zipfile.ZipFile(textqty,'w') as dest:
+   for name in src.namelist():dest.writestr(name,src.read(name).replace(b'<c r="E2"><v>3</v></c>',b'<c r="E2" t="inlineStr"><is><t>3</t></is></c>') if name.endswith('sheet1.xml') else src.read(name))
+  with self.assertRaisesRegex(ValueError,'modificada fuera'):merge_workbook(textqty.getvalue(),[entry,later],'2026-11',expected)
+
+ def test_publication_queue_does_not_starve_branches_under_continuous_capture(self):
+  seen=[]
+  with patch.object(OneDrivePT,'kick'):
+   self.enable()
+   for branch in ('EJIDOS','SAN PABLO','CUAUTITLAN'):self.entry(sucursal=branch)
+   def publish(config,branch,month,raw,old,token,*extra):seen.append(branch);self.entry(sucursal='CUAUTITLAN');return {'archivoId':branch,'etag':'v1'}
+   with patch.object(self.cloud,'access_token',return_value='test'),patch.object(self.cloud,'publish_file',side_effect=publish):
+    for _ in range(3):self.cloud.process_once()
+  self.assertEqual(set(seen),{'EJIDOS','SAN PABLO','CUAUTITLAN'})
 
 for name in dir(fixture.CommercialTests):
  if name.startswith('test_') and name not in PTTests.__dict__:setattr(PTTests,name,None)

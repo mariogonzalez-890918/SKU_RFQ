@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS pt_original_workbooks(branch TEXT NOT NULL,month TEXT
 CREATE INDEX IF NOT EXISTS pt_entries_scope ON pt_entries(branch,month);
 CREATE TABLE IF NOT EXISTS pt_exports(branch TEXT NOT NULL,month TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,synced INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'PENDIENTE',attempts INTEGER NOT NULL DEFAULT 0,retry_at REAL NOT NULL DEFAULT 0,lease REAL NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',payload TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(branch,month));
 CREATE TRIGGER IF NOT EXISTS pt_entries_no_delete BEFORE DELETE ON pt_entries BEGIN SELECT RAISE(ABORT,'El historial PT no se elimina.'); END;''')
+   if 'last_attempt' not in {r[1] for r in db.execute('PRAGMA table_info(pt_exports)')}:db.execute('ALTER TABLE pt_exports ADD COLUMN last_attempt REAL NOT NULL DEFAULT 0')
  def scope(self,actor,branch=None):
   require_module(actor,'pt')
   allowed=list(BRANCHES) if actor['role'] in MANAGERS else [b for b in actor.get('sucursales',[]) if b in BRANCHES]

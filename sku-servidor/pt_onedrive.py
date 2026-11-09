@@ -236,14 +236,15 @@ class OneDrivePT:
   _,config,_=self.read()
   if not config.get('habilitado') or not self.ready(config):return False
   with self.store.connect() as db:
-   db.execute('BEGIN IMMEDIATE');job=db.execute('SELECT branch,month,revision,synced,payload FROM pt_exports WHERE revision>synced AND lease<? AND retry_at<? AND attempts<8 ORDER BY month,branch LIMIT 1',(time.time(),time.time())).fetchone()
+   db.execute('BEGIN IMMEDIATE');job=db.execute('SELECT branch,month,revision,synced,payload FROM pt_exports WHERE revision>synced AND lease<? AND retry_at<? AND attempts<8 ORDER BY last_attempt,month,branch LIMIT 1',(time.time(),time.time())).fetchone()
    if not job:return False
-   branch,month,revision,_,payload=job;db.execute("UPDATE pt_exports SET lease=?,state='PUBLICANDO' WHERE branch=? AND month=?",(time.time()+240,branch,month))
+   branch,month,revision,_,payload=job;db.execute("UPDATE pt_exports SET lease=?,last_attempt=?,state='PUBLICANDO' WHERE branch=? AND month=?",(time.time()+240,time.time(),branch,month))
   try:
    actor={'role':'superadmin','email':'publicador-pt','modulos':['pt']};entries=list(reversed(self.pt.entries(actor,{'sucursal':branch,'mes':month})['ingresos']));raw=new_workbook(entries)
    def backup(original):
     with self.store.connect() as db:db.execute('INSERT OR IGNORE INTO pt_original_workbooks VALUES(?,?,?)',(branch,month,original))
    remote=publish_folder(config,branch,month,raw,json.loads(payload),entries,backup) if config.get('modo')=='carpeta' else self.publish_file(config,branch,month,raw,json.loads(payload),self.access_token(),entries,backup)
+   remote['cantidades']={e['folio']:e['cantidad'] if e['estado']=='REGISTRADO' else '0' for e in entries}
    with self.store.connect() as db:db.execute("UPDATE pt_exports SET synced=?,state=CASE WHEN revision>? THEN 'PENDIENTE' ELSE ? END,lease=0,error='',attempts=0,retry_at=0,payload=? WHERE branch=? AND month=?",(revision,revision,'GUARDADO_EN_CARPETA' if config.get('modo')=='carpeta' else 'PUBLICADO',dumps({**remote,'publicado':now()}),branch,month))
   except Exception as error:
    # Nunca guardar respuestas crudas, URLs de carga ni tokens dentro del estado público.
@@ -255,8 +256,8 @@ class OneDrivePT:
   if config.get('seleccionarLibros') and not selected:raise ValueError('Selecciona el libro de '+branch+' para el mes '+month+' desde Superadministrador.')
   if selected:
    id=selected['id'];current=request(GRAPH+'/me/drive/items/'+urllib.parse.quote(id,safe=''),token=token)
-   if old.get('archivoId') and (old['archivoId']!=id or current.get('eTag')!=old.get('etag')):raise ValueError('El libro cambió fuera de GMP. Revisa esa copia antes de publicar.')
-   original=download_file(current.get('@microsoft.graph.downloadUrl',''));raw=merge_workbook(original,entries or [],month)
+   if old.get('archivoId') and old['archivoId']!=id:raise ValueError('El libro cambió fuera de GMP. Revisa esa copia antes de publicar.')
+   original=download_file(current.get('@microsoft.graph.downloadUrl',''));raw=merge_workbook(original,entries or [],month,old.get('cantidades') if old.get('archivoId')==id else None)
    if backup and not old.get('archivoId'):backup(original)
    return self.upload_file(GRAPH+'/me/drive/items/'+urllib.parse.quote(id,safe='')+'/createUploadSession',raw,current.get('name',selected['nombre']),token,{'If-Match':current['eTag']},True)
   folder=config['carpetas'][branch];path='';parent='root'
@@ -271,8 +272,9 @@ class OneDrivePT:
   name='PT_'+branch.replace(' ','_')+'_'+month+'.xlsx';headers={}
   if old.get('archivoId'):
    current=request(GRAPH+'/me/drive/items/'+urllib.parse.quote(old['archivoId'],safe=''),token=token)
-   if current.get('eTag')!=old.get('etag'):raise ValueError('El Excel fue modificado fuera de GMP. Conserva esa copia y revisa el archivo antes de reanudar la publicación.')
-   url=GRAPH+'/me/drive/items/'+urllib.parse.quote(old['archivoId'],safe='')+'/createUploadSession';headers['If-Match']=old['etag']
+   if current.get('eTag')!=old.get('etag') and not old.get('cantidades'):raise ValueError('El Excel fue modificado fuera de GMP. Conserva esa copia y revisa el archivo antes de reanudar la publicación.')
+   if old.get('cantidades'):raw=merge_workbook(download_file(current.get('@microsoft.graph.downloadUrl','')),entries or [],month,old['cantidades'])
+   url=GRAPH+'/me/drive/items/'+urllib.parse.quote(old['archivoId'],safe='')+'/createUploadSession';headers['If-Match']=current['eTag']
   else:url=GRAPH+'/me/drive/items/'+urllib.parse.quote(parent,safe='')+':/'+urllib.parse.quote(name,safe='')+':/createUploadSession'
   return self.upload_file(url,raw,name,token,headers,bool(old.get('archivoId')))
  def upload_file(self,url,raw,name,token,headers,replace):

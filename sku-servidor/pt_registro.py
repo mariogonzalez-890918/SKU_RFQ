@@ -40,7 +40,11 @@ def shift_formula(formula,delta):
   parts[index]=re.sub(r'(?<![A-Za-z0-9_.])((?:\$)?[A-Za-z]{1,3})(\$?)([1-9][0-9]*)(\(?)',change,parts[index])
  return ''.join(parts)
 
-def merge_workbook(raw,entries,month):
+def merge_workbook(raw,entries,month,expected=None):
+ try:return _merge_workbook(raw,entries,month,expected)
+ except (zipfile.BadZipFile,ET.ParseError,KeyError,UnicodeError,IndexError,OverflowError,RuntimeError) as error:raise ValueError('No se pudo interpretar el libro. Usa un archivo .xlsx válido, sin cifrado, guardado con Excel.') from error
+
+def _merge_workbook(raw,entries,month,expected=None):
  with zipfile.ZipFile(io.BytesIO(raw)) as z:
   if sum(i.file_size for i in z.infolist())>256*1024*1024:raise ValueError('El libro es demasiado grande para validar sus registros.')
   wb=ET.fromstring(z.read('xl/workbook.xml'));rels={x.get('Id'):x.get('Target') for x in ET.fromstring(z.read('xl/_rels/workbook.xml.rels'))};sheets={s.get('name'):s for s in wb.find('s:sheets',NS)}
@@ -54,8 +58,10 @@ def merge_workbook(raw,entries,month):
    return ss[int(text)] if c.get('t')=='s' and text else text
   source=z.read(target).decode('utf8');root=ET.fromstring(source);sheetdata=root.find('s:sheetData',NS);parsed={int(r.get('r')):{re.sub('[0-9]','',c.get('r')):c for c in r} for r in sheetdata};head=parsed.get(1,{})
   if [norm(value(head.get(c))) for c in 'DEF']!=['PRODUCTO','CANTIDAD','UOM']:raise ValueError('Encabezados incompatibles: D debe ser PRODUCTO, E CANTIDAD y F UOM. El libro no se cambió.')
+  if len(sheetdata)!=len(parsed) or any(len(row)!=len(parsed[int(row.get('r'))]) for row in sheetdata):raise ValueError('El registro tiene filas o celdas duplicadas. Revisa el libro.')
   date1904=wb.find('s:workbookPr',NS);date1904=date1904 is not None and date1904.get('date1904') in ('1','true')
   rowxml={int(m.group(1)):m.group(0) for m in re.finditer(r'<row\b[^>]*\br="([0-9]+)"[^>]*(?:/>|>.*?</row>)',source,re.S)}
+  if len(rowxml)!=len(parsed) or '</sheetData>' not in source:raise ValueError('El formato XML del registro no es compatible. Guarda el libro como .xlsx con Excel.')
   formulas={};styles={};docs={};last=1;identifier=0
   for col in root.findall('s:cols/s:col',NS):
    if col.get('style') and int(col.get('min'))<=2<=int(col.get('max')):styles['B']=col.get('style')
@@ -76,6 +82,8 @@ def merge_workbook(raw,entries,month):
    if b and re.fullmatch(r'[0-9]+(?:\.[0-9]+)?',b):
     date=(dt.datetime(1904,1,1) if date1904 else dt.datetime(1899,12,30))+dt.timedelta(days=float(b))
     if date.strftime('%Y-%m')!=month:raise ValueError('El libro contiene entradas de otro mes. Prepara el inventario del mes '+month+' antes de publicar.')
+  expected=expected or {}
+  if any(folio not in docs for folio in expected):raise ValueError('Se eliminó o cambió un folio publicado por GMP. Revisa el libro antes de continuar.')
   names={};units={}
   if 'PRODUCTOS' in sheets:
    p=rels[sheets['PRODUCTOS'].get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')];p=p.lstrip('/') if p.startswith('/') else posixpath.normpath('xl/'+p)
@@ -99,6 +107,12 @@ def merge_workbook(raw,entries,month):
     try:same_date=abs(Decimal(value(cells.get('B')))-Decimal(serial_date(e['fecha'],date1904)))<Decimal('0.0000001')
     except Exception:same_date=False
     if not same_date:raise ValueError('Un folio PT existente tiene otra fecha de captura. No se cambió el libro.')
+    if e['folio'] in expected:
+     try:same_quantity=cells.get('E').get('t') in (None,'n') and cells.get('E').find('s:f',NS) is None and Decimal(value(cells.get('E')))==Decimal(expected[e['folio']])
+     except Exception:same_quantity=False
+     if not same_quantity:raise ValueError('La cantidad de un folio GMP fue modificada fuera del sistema. No se sobrescribió.')
+    desired=e['cantidad'] if e['estado']=='REGISTRADO' else '0'
+    if cells.get('E') is not None and cells['E'].get('t') in (None,'n') and cells['E'].find('s:f',NS) is None and value(cells.get('E')) and Decimal(value(cells.get('E')))==Decimal(desired):continue
    else:last+=1;number=last;identifier+=1
    if number>1048576:raise ValueError('El registro de Excel llegó a su límite de filas.')
    text=rowxml.get(number,'<row r="'+str(number)+'"></row>');text=re.sub(r'/>$','></row>',text);cells=parsed.get(number,{})
@@ -119,6 +133,7 @@ def merge_workbook(raw,entries,month):
    opening=text[:text.index('>')+1];text=opening+''.join(fragments[c] for c in sorted(fragments,key=order))+'</row>'
    if number in rowxml:replacements[number]=text
    else:newrows.append(text)
+  if not replacements and not newrows:return raw
   updated=re.sub(r'<row\b[^>]*\br="([0-9]+)"[^>]*(?:/>|>.*?</row>)',lambda m:replacements.get(int(m.group(1)),m.group(0)),source,flags=re.S)
   updated=updated.replace('</sheetData>',''.join(newrows)+'</sheetData>')
   def expand(m):
