@@ -31,6 +31,8 @@ jobs:
           node tests/commercial_browser_regression.mjs
       - name: Compilar distribución pública
         run: python tools/build_public.py --output-dir dist-public
+      - name: Probar EXE distribuido y códigos PT
+        run: python tools/test_windows_exe.py dist-public/GMP_ERP.exe
       - name: Publicar EXE y ZIP en Releases
         shell: pwsh
         env:

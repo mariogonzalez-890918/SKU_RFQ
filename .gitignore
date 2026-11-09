@@ -136,3 +136,5 @@
 !/docs/v3.2/
 /docs/v3.2/*
 !/docs/v3.2/*.md
+
+!/tools/test_windows_exe.py
