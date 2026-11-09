@@ -1,4 +1,5 @@
 """Servidor SKU JAD: Python estándar, SQLite y control de concurrencia."""
+import ssl
 import argparse,base64,contextlib,datetime,hashlib,hmac,http.server,http.cookies,json,pathlib,re,secrets,sqlite3,time,unicodedata,zipfile,io,sys
 ROOT=pathlib.Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
@@ -17,11 +18,12 @@ from aprobaciones_admin import AdminApprovals
 from comercial_routes import CommercialAPI
 from pedidos_compra_routes import PurchaseAPI
 from inventarios_routes import InventoryAPI
+from pt_routes import PTAPI
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
 ADMIN_EMAIL='sistemas@grupomipan.com'
-ROLES={'superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventaspasteleria':'VENTASPASTELERIA','ventasins':'VentasIns','expendios':'Expendios'}
+ROLES={'pt':'PT · Producto terminado','superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventaspasteleria':'VENTASPASTELERIA','ventasins':'VentasIns','expendios':'Expendios'}
 def read_scope(actor,scope):
  require_module(actor,scope)
 def write_scope(actor,scope):
@@ -104,6 +106,10 @@ class Store:
     db.execute("INSERT INTO permission_features VALUES('capabilities-v1')")
    if not db.execute("SELECT 1 FROM permission_features WHERE key='manager-requisitions-v2'").fetchone():
     row=db.execute("SELECT modules FROM role_modules WHERE role='gerente'").fetchone();modules=list(dict.fromkeys(json.loads(row[0])+['requisiciones','cargar_maestro']));db.execute("UPDATE role_modules SET modules=?,revision=revision+1 WHERE role='gerente'",(json.dumps(modules),));db.execute("INSERT INTO permission_features VALUES('manager-requisitions-v2')")
+   if not db.execute("SELECT 1 FROM permission_features WHERE key='pt-v1'").fetchone():
+    for role in ('gerente','auxti'):
+     row=db.execute('SELECT modules FROM role_modules WHERE role=?',(role,)).fetchone();modules=list(dict.fromkeys(json.loads(row[0])+['pt']));db.execute('UPDATE role_modules SET modules=?,revision=revision+1 WHERE role=?',(json.dumps(modules),role))
+    db.execute("INSERT INTO permission_features VALUES('pt-v1')")
    db.execute('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,email TEXT NOT NULL,csrf TEXT NOT NULL,expires REAL NOT NULL)')
    db.execute('CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY,count INTEGER NOT NULL,until REAL NOT NULL)')
    if not db.execute('SELECT 1 FROM users WHERE email=?',(ADMIN_EMAIL,)).fetchone():
@@ -169,6 +175,7 @@ class Store:
   role=data.get('perfil');modules=data.get('modulos');revision=data.get('revision')
   if role not in ROLES or role=='superadmin':raise ValueError('El superadministrador conserva acceso completo.')
   if not isinstance(modules,list) or any(not isinstance(m,str) or m not in MODULES for m in modules) or len(set(modules))!=len(modules) or type(revision) is not int:raise ValueError('Configuración de módulos inválida.')
+  if role=='pt' and any(m!='pt' for m in modules):raise ValueError('El perfil PT solo tiene acceso al ingreso de producto terminado.')
   if role=='requisicion' and any(m!='requisiciones' for m in modules):raise ValueError('El perfil Requisición solo permite crear y consultar sus propias solicitudes.')
   with self.connect() as db:
    db.execute('BEGIN IMMEDIATE');old=db.execute('SELECT revision FROM role_modules WHERE role=?',(role,)).fetchone()
@@ -205,8 +212,9 @@ class Store:
     assigned[field]=values
    if role=='gerente' and set(assigned['sucursales'])!=set(BRANCHES):raise ValueError('El gerente consulta las cuatro sucursales.')
    if role=='almacenista' and not assigned['almacenes']:raise ValueError('Selecciona al menos un almacén para el almacenista.')
-   if role=='requisicion' and not assigned['sucursales']:raise ValueError('Selecciona al menos una sucursal para el perfil Requisición.')
-   if role not in ('gerente','requisicion'):assigned['sucursales']=[]
+   if role in ('requisicion','pt') and not assigned['sucursales']:raise ValueError('Selecciona al menos una sucursal para el perfil.')
+   if role=='pt' and any(b=='EJE 8' for b in assigned['sucursales']):raise ValueError('PT solo opera EJIDOS, SAN PABLO y CUAUTITLAN.')
+   if role not in ('gerente','requisicion','pt'):assigned['sucursales']=[]
    if role!='almacenista':assigned['almacenes']=[]
    if not old and not password:raise ValueError('Define una contraseña para el usuario nuevo.')
    salt,digest=new_password(password) if password else old
@@ -221,6 +229,7 @@ def create_handler(store):
  reports=ReportStore(store,requisitions)
  procurement=PurchaseAPI(store,commercial.cm,requisitions,reports)
  inventory=InventoryAPI(store,procurement.po)
+ pt=PTAPI(store)
  procurement.po.inventory=inventory.inv
  workflow=WorkflowStore(store,requisitions,reports)
  workflow.inventory=inventory.inv
@@ -252,6 +261,16 @@ def create_handler(store):
     if not any(m in enabled_modules(actor) for m in ('ventasins','expendios')):return self.reply(403,{'error':'Módulo comercial no habilitado.'})
     file,kind={'/comercial':('commercial.html','text/html'),'/commercial.js':('commercial.js','text/javascript'),'/commercial.css':('commercial.css','text/css')}[path]
     return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
+   if path in ('/pt','/pt.js','/pt.css','/pt-scanner.js','/pt-scanner-license.txt'):
+    try:
+     require_module(actor,'pt');file,kind={'/pt':('pt.html','text/html'),'/pt.js':('pt.js','text/javascript'),'/pt.css':('pt.css','text/css'),'/pt-scanner.js':('pt-scanner.js','text/javascript'),'/pt-scanner-license.txt':('PT-SCANNER-LICENSE.txt','text/plain')}[path];return self.reply(200,(ROOT/'public'/file).read_bytes(),kind+'; charset=utf-8')
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+   if path.startswith('/api/pt/'):
+    try:
+     result=pt.get(path,parse_qs(urlsplit(self.path).query),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except RequisitionConflict as e:return self.reply(409,{'error':str(e)})
+    except (ValueError,KeyError,TypeError,ArithmeticError) as e:return self.reply(400,{'error':str(e)})
    if path in ('/inventarios','/inventory.js'):
     try:
      require_module(actor,'inventarios');name,kind=('inventory.html','text/html') if path=='/inventarios' else ('inventory.js','text/javascript');return self.reply(200,(ROOT/'public'/name).read_bytes(),kind+'; charset=utf-8')
@@ -389,6 +408,8 @@ def create_handler(store):
     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),actor['csrf']):return self.reply(403,{'error':'Solicitud sin verificación de sesión.'})
     if self.path=='/api/logout' and self.command=='POST':
      store.logout(self.token);return self.reply(200,{'ok':True},cookie='gmp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+    if self.path.startswith('/api/pt/') and self.command=='POST':
+     result=pt.mutate(self.path,self.read_body(),actor);return self.reply(200,result)
     if self.path.startswith('/api/inventarios/') and self.command=='POST':
      result=inventory.mutate(self.path,self.read_body(),actor);return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
     if self.path.startswith('/api/pedidoscompra/') and self.command=='POST':
@@ -453,11 +474,12 @@ def create_handler(store):
    except Exception:self.reply(500,{'error':'No se pudo guardar. Revisa el registro del servidor.'})
   def log_message(self,fmt,*args):print(self.address_string(),fmt%args,flush=True)
  Handler.commercial=commercial
+ Handler.pt=pt
  Handler.inventory=inventory
  Handler.procurement=procurement
  return Handler
 def main():
- parser=argparse.ArgumentParser();parser.add_argument('--host',default='0.0.0.0');parser.add_argument('--port',type=int);parser.add_argument('--data-dir',default=str(APP_DIR/'data'));args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--host',default='0.0.0.0');parser.add_argument('--port',type=int);parser.add_argument('--data-dir',default=str(APP_DIR/'data'));parser.add_argument('--tls-cert');parser.add_argument('--tls-key');args=parser.parse_args()
  configpath=APP_DIR/'config.json'
  if not configpath.exists():configpath.write_text(json.dumps({'port':8080},indent=2),encoding='utf8')
  config=json.loads(configpath.read_text(encoding='utf8'))
@@ -466,7 +488,11 @@ def main():
  port=args.port or config.get('port',8080);store=Store(args.data_dir)
  handler=create_handler(store);handler.commercial.sync.start()
  server=http.server.ThreadingHTTPServer((args.host,port),handler);server.daemon_threads=True
- print(f'\n{TITLE} v{VERSION}\n{SUPPORT_LINE}\nPuerto: {port}\nLocal: http://127.0.0.1:{port}\nRed/VPN: http://IP-DEL-SERVIDOR:{port}\nSuperadministrador: {ADMIN_EMAIL}\nInicia sesión con la contraseña configurada.\nDatos: {store.path}\nCtrl+C para detener.\n',flush=True)
+ cert=args.tls_cert or config.get('tls_cert');tls_key=args.tls_key or config.get('tls_key');scheme='http'
+ if bool(cert)!=bool(tls_key):raise ValueError('HTTPS requiere certificado y clave TLS.')
+ if cert:
+  context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2;context.load_cert_chain(str(APP_DIR/cert),str(APP_DIR/tls_key));server.socket=context.wrap_socket(server.socket,server_side=True);scheme='https'
+ print(f'\n{TITLE} v{VERSION}\n{SUPPORT_LINE}\nPuerto: {port}\nLocal: {scheme}://127.0.0.1:{port}\nRed/VPN: {scheme}://IP-DEL-SERVIDOR:{port}\nSuperadministrador: {ADMIN_EMAIL}\nInicia sesión con la contraseña configurada.\nDatos: {store.path}\nCtrl+C para detener.\n',flush=True)
  try:server.serve_forever()
  except KeyboardInterrupt:pass
  finally:server.server_close()

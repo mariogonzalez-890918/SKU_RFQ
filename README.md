@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.8
+# GMP ERP · Versión 3.2.0
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -7,6 +7,14 @@ Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos s
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
+## Cambios 3.2.0
+
+Nuevo módulo **PT · Producto terminado** sobre el maestro de ventas. Genera etiquetas PDF con QR y Code 128 usando los SKU existentes; identifica productos por lector externo, cámara HTTPS o foto del código; PT captura únicamente cantidad y consulta sus propios ingresos en sucursales asignadas. Opera EJIDOS, SAN PABLO y CUAUTITLAN (EJE 8 queda excluido de PT).
+
+Cada ingreso tiene folio e identificador único, unidad y descripción del maestro, fecha de servidor y usuario. Las confirmaciones repetidas no duplican el ingreso. Gerencia, AUXTI y Superadministrador cancelan conservando el original; Excel contiene detalle y resumen neto por SKU/unidad. Este registro es de ingresos PT y no se mezcla con el Kárdex de materias primas ni representa stock neto después de ventas.
+
+Publicación de un Excel nuevo por sucursal/mes en OneDrive personal, actualizado en segundo plano después de capturar. Incluye configuración guiada para registrar aplicación Microsoft, conectar la cuenta propietaria y autorizar permisos delegados; **requiere completar esa conexión antes de publicar en la nube**. Tokens privados protegidos con DPAPI bajo la cuenta Windows del servidor. Conserva pendientes, reintenta y detecta cambios externos en el archivo. Los permisos de consulta se configuran en OneDrive: compartir la carpeta solo lectura. Consulta [guía PT](docs/v3.2/PT.md).
 
 ## Cambios 3.1.8
 

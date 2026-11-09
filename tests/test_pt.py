@@ -1,0 +1,122 @@
+"""PT con HTTP/SQLite real y publicación Microsoft simulada: alcance, precisión y reintentos."""
+import io,json,uuid,zipfile,concurrent.futures,sys
+from unittest.mock import patch
+import test_commercial as fixture
+from pt_routes import PTAPI
+from pt_onedrive import OneDrivePT,CloudError,crypt
+
+class PTTests(fixture.CommercialTests):
+ def setUp(self):
+  super().setUp();self.load_master();self.api=PTAPI(self.store);self.pt=self.api.pt;self.cloud=self.api.cloud;self.sku=fixture.SKU
+ def user(self,role='pt',branches=None,email=None):
+  email=email or role+'@pt.test';self.value('/api/users',{'email':email,'name':'Usuario '+role,'role':role,'password':self.password,'active':True,'sucursales':branches or ['EJIDOS']});return self.login(email)
+ def product(self,actor=None):return self.value('/api/pt/producto?sku='+self.sku,actor=actor)
+ def entry(self,actor=None,**fields):return self.value('/api/pt/ingresos',self.data(actor,**fields),actor)
+ def data(self,actor=None,**fields):return {'sku':self.sku,'sucursal':'EJIDOS','cantidad':'3','revisionProducto':self.product(actor)['revision'],'clave':uuid.uuid4().hex,**fields}
+ def configure(self,actor=None):
+  state=self.value('/api/pt/onedrive');return self.value('/api/pt/onedrive/configurar',{'revision':state['revision'],'cliente':'11111111-1111-1111-1111-111111111111','cuenta':'soportetecnico@grupomipan.com','carpetas':{'EJIDOS':'GMP_PT/EJIDOS','SAN PABLO':'GMP_PT/SAN_PABLO','CUAUTITLAN':'GMP_PT/CUAUTITLAN'},'habilitado':True},actor)
+ def enable(self):
+  self.configure()
+  with self.store.connect() as db:
+   c=json.loads(db.execute('SELECT payload FROM pt_cloud').fetchone()[0]);c['conectado']=True;db.execute('UPDATE pt_cloud SET payload=?',(json.dumps(c),))
+ def test_pt_only_own_history_branch_scope_no_prices_or_module_escalation(self):
+  pt=self.user();other=self.user(email='otro@pt.test');meta=self.value('/api/pt/meta',actor=pt);self.assertEqual(meta['sucursales'],['EJIDOS']);self.assertFalse(meta['administra']);self.assertEqual(self.value('/api/me',actor=pt)['user']['modulos'],['pt']);one=self.entry(pt)['ingreso'];self.entry(other)
+  history=self.value('/api/pt/ingresos',actor=pt)['ingresos'];self.assertEqual([r['id'] for r in history],[one['id']]);self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),2)
+  for path in ('/api/catalogo','/api/comercial/productos?canal=ventasins&empresa='+str(self.company),'/api/requisiciones/materiales','/api/pt/ingresos?sucursal=SAN%20PABLO','/api/pt/etiquetas/pdf'):
+   self.assertEqual(self.call(path,actor=pt)[0],403,path)
+  text=json.dumps(self.product(pt));self.assertNotIn('precio',text);self.assertNotIn('iva',text);self.assertNotIn('costo',text)
+  profile=next(p for p in self.value('/api/perfiles')['perfiles'] if p['perfil']=='pt');self.assertEqual(self.call('/api/perfiles',{'perfil':'pt','revision':profile['revision'],'modulos':['pt','compras']},method='PUT')[0],400)
+ def test_exact_quantity_server_master_fields_and_closed_eje8(self):
+  pt=self.user();base=self.data(pt)
+  for qty in ('0','-1','NaN','Infinity','1.5','1e10',True,'0.00001'):
+   self.assertEqual(self.call('/api/pt/ingresos',{**base,'cantidad':qty},pt)[0],400,qty)
+  for extra in ({'fecha':'2000-01-01'},{'descripcion':'OTRO PAN'},{'unidad':'KILO'},{'sucursal':'EJE 8'}):self.assertIn(self.call('/api/pt/ingresos',{**base,**extra},pt)[0],(400,403))
+  saved=self.entry(pt)['ingreso'];self.assertEqual(saved['descripcion'],'PRODUCTO DE PRUEBA');self.assertEqual(saved['unidad'],'PIEZA');self.assertNotIn('2000',saved['fecha']);self.assertIn('revisionMaestro',saved)
+ def test_duplicate_concurrent_retry_creates_one_row_and_queues_once(self):
+  actor=self.user();data=self.data(actor)
+  with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:results=list(pool.map(lambda _:self.call('/api/pt/ingresos',data,actor),range(4)))
+  self.assertTrue(all(s==200 for s,_,_ in results));self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),1)
+  with self.store.connect() as db:self.assertEqual(db.execute('SELECT revision FROM pt_exports').fetchone()[0],1)
+  self.assertEqual(self.call('/api/pt/ingresos',{**data,'cantidad':'4'},actor)[0],409)
+ def test_master_change_requires_rescan_and_inactive_product_rejected(self):
+  data=self.data();self.cm('maestro',{'empresas':[self.company],'archivo':'NEW.xlsx','contenido':fixture.master().replace('X','X')})
+  with self.store.connect() as db:
+   row=db.execute('SELECT payload FROM cm_products WHERE sku=?',(self.sku,)).fetchone();product=json.loads(row[0]);product['nombre']='NOMBRE NUEVO';db.execute('UPDATE cm_products SET payload=? WHERE sku=?',(json.dumps(product),self.sku))
+  self.assertEqual(self.call('/api/pt/ingresos',data)[0],409)
+  with self.store.connect() as db:product['activo']=False;db.execute('UPDATE cm_products SET payload=? WHERE sku=?',(json.dumps(product),self.sku))
+  self.assertEqual(self.call('/api/pt/producto?sku='+self.sku)[0],400)
+ def test_three_branches_month_rollover_cancel_original_month_and_xlsx_numbers(self):
+  entries=[]
+  with patch('pt.now',return_value='2026-11-30T23:59:59-06:00'):
+   for b in ('EJIDOS','SAN PABLO','CUAUTITLAN'):entries.append(self.entry(sucursal=b)['ingreso'])
+  with patch('pt.now',return_value='2026-12-01T00:00:01-06:00'):self.entry();self.value('/api/pt/cancelar',{'id':entries[0]['id'],'revision':1,'motivo':''})
+  with self.store.connect() as db:self.assertEqual(db.execute('SELECT revision FROM pt_exports WHERE branch=? AND month=?',('EJIDOS','2026-11')).fetchone()[0],2);self.assertEqual(db.execute('SELECT COUNT(*) FROM pt_exports').fetchone()[0],4)
+  status,raw,_=self.call('/api/pt/excel?sucursal=EJIDOS&mes=2026-11');self.assertEqual(status,200)
+  with zipfile.ZipFile(io.BytesIO(raw)) as z:
+   self.assertEqual(z.testzip(),None);xml=z.read('xl/worksheets/sheet1.xml').decode();self.assertIn('CANCELADO',xml);self.assertIn('<c r="I2"><v>0</v></c>',xml);self.assertIn(self.sku,xml);self.assertNotIn('Precio',xml);self.assertIn('RESUMEN_PT',z.read('xl/workbook.xml').decode())
+ def test_cancellation_requires_manager_and_does_not_delete_original(self):
+  user=self.user();entry=self.entry(user)['ingreso'];data={'id':entry['id'],'revision':1};self.assertEqual(self.call('/api/pt/cancelar',data,user)[0],403)
+  manager=self.user('gerente',list(fixture.fixtures.requisiciones.BRANCHES));self.value('/api/pt/cancelar',data,manager);current=self.value('/api/pt/ingresos',actor=user)['ingresos'][0];self.assertEqual(current['estado'],'CANCELADO');self.assertEqual(current['cantidad'],'3');self.assertEqual(self.call('/api/pt/cancelar',data,manager)[0],409)
+ def test_pdf_qr_and_bars_from_validated_master_and_permissions(self):
+  import pypdf
+  status,raw,_=self.call('/api/pt/etiquetas/pdf?skus='+self.sku);self.assertEqual(status,200);pdf=pypdf.PdfReader(io.BytesIO(raw));self.assertIn(self.sku,pdf.pages[0].extract_text());self.assertIn('PRODUCTO DE PRUEBA',pdf.pages[0].extract_text())
+  for kind in ('qr','barras'):
+   status,raw,_=self.call('/api/pt/codigo/svg?sku='+self.sku+'&tipo='+kind);self.assertEqual(status,200);self.assertIn(b'<svg',raw)
+ def test_cloud_configuration_not_exposed_to_pt_and_device_authorization_tokens_private(self):
+  actor=self.user();self.assertEqual(self.call('/api/pt/onedrive/configurar',{},actor)[0],403);self.configure()
+  def fake(url,method='GET',data=None,token=None,**kw):
+   if url.endswith('/devicecode'):return {'device_code':'secret-device','verification_uri':'https://microsoft.com/devicelogin','user_code':'DEMO1234','expires_in':900,'interval':5}
+   if url.endswith('/token'):return {'access_token':'secret-access-token','refresh_token':'secret-refresh-token','expires_in':3600}
+   return {'mail':'soportetecnico@grupomipan.com'}
+  # Native DPAPI remains exercised on Windows; only network is replaced.
+  with patch('pt_onedrive.request',side_effect=fake),patch.object(OneDrivePT,'kick'):
+   r=self.value('/api/pt/onedrive/conectar',{});self.assertEqual(r['codigo'],'DEMO1234');self.assertNotIn('secret',json.dumps(r));self.assertTrue(self.value('/api/pt/onedrive/verificar',{})['conectado'])
+  public=self.value('/api/pt/onedrive',actor=actor);self.assertNotIn('configuracion',public);self.assertNotIn('secret',json.dumps(self.value('/api/pt/onedrive')))
+  with self.store.connect() as db:self.assertNotIn('secret-access-token',db.execute('SELECT secret FROM pt_cloud').fetchone()[0])
+ def test_cloud_publication_failure_pending_then_retry_full_snapshot_without_double_rows(self):
+  with patch.object(OneDrivePT,'kick'):
+   self.enable();self.entry();calls=[]
+   def publish(c,b,m,raw,old,token):
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:calls.append(z.read('xl/worksheets/sheet1.xml').count(b'<row'))
+    if len(calls)==1:raise CloudError(503)
+    return {'archivoId':'demo','etag':'v1','archivo':'PT_EJIDOS_'+m+'.xlsx','enlace':'https://onedrive.live.com/demo'}
+   with patch.object(self.cloud,'access_token',return_value='test'),patch.object(self.cloud,'publish_file',side_effect=publish):
+    self.cloud.process_once();state=self.value('/api/pt/onedrive')['publicaciones'][0];self.assertTrue(state['pendiente']);self.assertIn('503',state['error']);self.entry();self.cloud.process_once()
+   state=self.value('/api/pt/onedrive')['publicaciones'][0];self.assertFalse(state['pendiente']);self.assertEqual(calls,[2,3]);self.assertEqual(len(self.value('/api/pt/ingresos')['ingresos']),2)
+ def test_cloud_snapshot_new_capture_during_upload_remains_pending(self):
+  with patch.object(OneDrivePT,'kick'):
+   self.enable();self.entry()
+   def publish(*args):self.entry();return {'archivoId':'demo','etag':'v1'}
+   with patch.object(self.cloud,'access_token',return_value='test'),patch.object(self.cloud,'publish_file',side_effect=publish):self.cloud.process_once()
+   with self.store.connect() as db:self.assertEqual(db.execute('SELECT revision,synced FROM pt_exports').fetchone(),(2,1))
+ def test_external_workbook_edit_is_not_overwritten(self):
+  calls=[]
+  def remote(url,*args,**kwargs):
+   calls.append(url)
+   return {'id':'folder','folder':{}} if '/root:' in url else {'id':'file','eTag':'changed-outside'}
+  _,config,_=self.cloud.read()
+  with patch('pt_onedrive.request',side_effect=remote):
+   with self.assertRaisesRegex(ValueError,'modificado fuera'):self.cloud.publish_file(config,'EJIDOS','2026-11',b'x',{'archivoId':'file','etag':'before'},'test')
+  self.assertFalse(any('UploadSession' in u for u in calls))
+ def test_cloud_creates_three_monthly_files_and_updates_with_etag_without_token_on_upload(self):
+  _,config,_=self.cloud.read();calls=[];filename=[]
+  def remote(url,method='GET',data=None,token=None,headers=None,**kw):
+   calls.append((url,method,data,token,headers))
+   if '/root:' in url:return {'id':'folder','folder':{}}
+   if url.endswith('/createUploadSession'):
+    if '/items/file-' in url:self.assertEqual(headers['If-Match'],'v1');self.assertEqual(data['item']['@microsoft.graph.conflictBehavior'],'replace')
+    else:filename.append(url);self.assertEqual(data['item']['@microsoft.graph.conflictBehavior'],'fail')
+    return {'uploadUrl':'https://test.up.1drv.com/upload'}
+   if method=='PUT':
+    self.assertIsNone(token);self.assertEqual(headers['Content-Range'],'bytes 0-2/3');return {'id':'file-'+str(len(filename)),'eTag':'v1','webUrl':'https://onedrive.live.com/example'}
+   return {'id':'file','eTag':'v1'}
+  with patch('pt_onedrive.request',side_effect=remote):
+   for branch in ('EJIDOS','SAN PABLO','CUAUTITLAN'):
+    saved=self.cloud.publish_file(config,branch,'2026-11',b'abc',{},'private-token');self.cloud.publish_file(config,branch,'2026-11',b'abc',saved,'private-token')
+   self.cloud.publish_file(config,'EJIDOS','2026-12',b'abc',{},'private-token')
+  self.assertEqual(len(filename),4);self.assertTrue(any('PT_SAN_PABLO_2026-11.xlsx' in u for u in filename));self.assertTrue(any('PT_EJIDOS_2026-12.xlsx' in u for u in filename))
+ def test_native_token_encryption_roundtrip(self):
+  raw=b'test-token-only';encrypted=crypt(raw);self.assertNotEqual(raw,encrypted);self.assertEqual(crypt(encrypted,True),raw)
+
+for name in dir(fixture.CommercialTests):
+ if name.startswith('test_') and name not in PTTests.__dict__:setattr(PTTests,name,None)

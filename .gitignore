@@ -120,3 +120,19 @@
 !/docs/v3.1/*.md
 
 !/tools/test_all.py
+
+!/sku/pt.css
+!/sku/vendor/
+/sku/vendor/*
+!/sku/vendor/zxing-0.21.3.min.js
+!/sku/vendor/ZXING-LICENSE.txt
+!/sku-servidor/public/pt.html
+!/sku-servidor/public/pt.js
+!/sku-servidor/public/pt.css
+!/sku-servidor/public/pt-scanner.js
+!/sku-servidor/public/PT-SCANNER-LICENSE.txt
+!/tests/test_pt.py
+
+!/docs/v3.2/
+/docs/v3.2/*
+!/docs/v3.2/*.md
