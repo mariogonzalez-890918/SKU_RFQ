@@ -1,5 +1,5 @@
 """API PT independiente del inventario de materias primas y sin precios."""
-from pt import PTStore,BRANCHES,MANAGERS,MIME
+from pt import PTStore,BRANCHES,MANAGERS,MIME,qr_value
 from pt_onedrive import OneDrivePT
 from requisiciones import now,Conflict
 import json
@@ -18,7 +18,7 @@ class PTAPI:
   if action=='codigo/svg':
    from reportlab.graphics.barcode import createBarcodeDrawing
    from reportlab.graphics import renderSVG
-   p=pt.product(q.get('sku',''),actor);drawing=createBarcodeDrawing('QR' if q.get('tipo')=='qr' else 'Code128',value=p['sku'],**({'width':160,'height':160,'barBorder':4} if q.get('tipo')=='qr' else {'barWidth':2,'barHeight':72,'quiet':True,'humanReadable':True}))
+   p=pt.product(q.get('sku',''),actor);drawing=createBarcodeDrawing('QR' if q.get('tipo')=='qr' else 'Code128',value=qr_value(p['sku'],q.get('servidor','')) if q.get('tipo')=='qr' else p['sku'],**({'width':200,'height':200,'barBorder':4} if q.get('tipo')=='qr' else {'barWidth':2,'barHeight':72,'quiet':True,'humanReadable':True}))
    return renderSVG.drawToString(drawing).encode(),'image/svg+xml'
   if action=='clave':
    with pt.store.connect() as db:row=db.execute('SELECT payload FROM pt_entries WHERE creator=? AND client_key=?',(actor['email'],q.get('clave',''))).fetchone()

@@ -34,3 +34,11 @@ Los tokens se almacenan con DPAPI, vinculados a la cuenta de Windows del servido
 ## Cámara de video por HTTPS
 
 El servidor acepta `tls_cert` y `tls_key` en config.json (rutas absolutas o relativas al EXE), o `--tls-cert` y `--tls-key`. El certificado debe ser válido y confiable para el nombre usado en los teléfonos. No se crea un certificado autofirmado ni se altera el firewall automáticamente. Alternativa: publicar GMP detrás de un proxy HTTPS administrado. Un certificado rechazado o una IP que no coincida con su nombre no habilita la cámara. El lector externo funciona en HTTP; la foto usa el selector de imágenes del navegador.
+
+## Corrección móvil 3.2.1
+
+En Etiquetas QR / barras, Dirección de GMP se rellena con la dirección actual (local o ZeroTier) y puede cambiarse antes de generar el PDF. El QR contiene un enlace a `/pt?sku=...` para la cámara normal del teléfono; Code128 conserva el SKU. El teléfono debe poder alcanzar esa dirección y puerto. Un QR impreso tiene una dirección fija; no cambia automáticamente entre redes. El lector dentro de PT acepta ambos formatos y las etiquetas anteriores con SKU solo.
+
+Abrir el QR sin sesión muestra el inicio de sesión y conserva el producto. No registra cantidades ni publica datos hasta confirmar el ingreso. Si hay una captura pendiente de confirmar, se verifica antes de abrir otro producto. HTTP permite abrir el enlace desde la cámara del teléfono; el video dentro del navegador sigue requiriendo HTTPS.
+
+El estado OneDrive NO conectado es explícito. La liga del libro de ejemplo no autoriza escritura ni lo convierte en destino. Se mantiene el esquema acordado de nuevos Excel mensuales por sucursal, después de completar la autorización Microsoft. No se ha validado una conexión real mientras esa autorización siga pendiente.

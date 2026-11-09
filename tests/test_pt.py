@@ -1,9 +1,10 @@
 """PT con HTTP/SQLite real y publicación Microsoft simulada: alcance, precisión y reintentos."""
-import io,json,uuid,zipfile,concurrent.futures,sys
+import io,json,uuid,zipfile,concurrent.futures,sys,urllib.request,urllib.parse
 from unittest.mock import patch
 import test_commercial as fixture
 from pt_routes import PTAPI
 from pt_onedrive import OneDrivePT,CloudError,crypt
+from pt import qr_value,scan_sku
 
 class PTTests(fixture.CommercialTests):
  def setUp(self):
@@ -62,6 +63,21 @@ class PTTests(fixture.CommercialTests):
   status,raw,_=self.call('/api/pt/etiquetas/pdf?skus='+self.sku);self.assertEqual(status,200);pdf=pypdf.PdfReader(io.BytesIO(raw));self.assertIn(self.sku,pdf.pages[0].extract_text());self.assertIn('PRODUCTO DE PRUEBA',pdf.pages[0].extract_text())
   for kind in ('qr','barras'):
    status,raw,_=self.call('/api/pt/codigo/svg?sku='+self.sku+'&tipo='+kind);self.assertEqual(status,200);self.assertIn(b'<svg',raw)
+ def test_mobile_qr_url_and_legacy_barcodes_resolve_same_product(self):
+  actor=self.user()
+  for base in ('http://192.168.1.20:8080','http://26.10.20.30:8080','https://gmp.example.test'):
+   code=qr_value(self.sku,base);self.assertEqual(scan_sku(code),self.sku)
+   self.assertEqual(self.value('/api/pt/producto?'+urllib.parse.urlencode({'sku':code}),actor=actor)['sku'],self.sku)
+  self.assertEqual(scan_sku(self.sku),self.sku)
+  for code in ('https://example.test/pt?sku='+self.sku+'&cantidad=3','https://example.test/pt?sku='+self.sku+'&sku='+self.sku,'https://example.test/otro?sku='+self.sku,'https://user:pass@example.test/pt?sku='+self.sku):
+   self.assertEqual(self.call('/api/pt/producto?'+urllib.parse.urlencode({'sku':code}),actor=actor)[0],400)
+  self.assertEqual(self.value('/api/pt/ingresos',actor=actor)['ingresos'],[])
+ def test_mobile_label_url_validation_and_authentication_preserve_product(self):
+  for base in ('javascript:alert(1)','https://user:pass@example.test','https://example.test/?token=secret','https://example.test/otro','https://example.test/#x'):
+   with self.assertRaises(ValueError):qr_value(self.sku,base)
+  with urllib.request.urlopen(self.url+'/pt?sku='+self.sku) as response:
+   html=response.read().decode();self.assertIn('id="login"',html);self.assertIn("'/pt'+location.search",html)
+  status,raw,_=self.call('/api/pt/etiquetas/pdf?'+urllib.parse.urlencode({'skus':self.sku,'servidor':'http://26.10.20.30:8080'}));self.assertEqual(status,200);self.assertTrue(raw.startswith(b'%PDF-'))
  def test_cloud_configuration_not_exposed_to_pt_and_device_authorization_tokens_private(self):
   actor=self.user();self.assertEqual(self.call('/api/pt/onedrive/configurar',{},actor)[0],403);self.configure()
   def fake(url,method='GET',data=None,token=None,**kw):

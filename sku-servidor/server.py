@@ -255,6 +255,7 @@ def create_handler(store):
    actor=self.auth()
    if path in ('/','/index.html'):
     name='index.html' if actor else 'login.html';return self.reply(200,(ROOT/'public'/name).read_bytes(),'text/html; charset=utf-8')
+   if path=='/pt' and not actor:return self.reply(200,(ROOT/'public/login.html').read_bytes(),'text/html; charset=utf-8')
    if not actor:return self.reply(401,{'error':'Inicia sesión para continuar.'})
    if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES,'app':{'titulo':TITLE,'version':VERSION,'soporte':SUPPORT_LINE}})
    if path in ('/comercial','/commercial.js','/commercial.css'):

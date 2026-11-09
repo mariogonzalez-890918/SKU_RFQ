@@ -5,10 +5,27 @@ from permissions import require_module
 from requisiciones import Conflict,now,text
 from comercial import dumps
 from fechas import display_date
+from urllib.parse import urlsplit,parse_qs,urlencode
 
 BRANCHES=('EJIDOS','SAN PABLO','CUAUTITLAN')
 MANAGERS={'superadmin','auxti','gerente'}
 MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+def scan_sku(value):
+ code=str(value).strip()
+ if code.lower().startswith(('http://','https://')):
+  url=urlsplit(code);q=parse_qs(url.query)
+  if not url.hostname or url.username or url.password or url.path!='/pt' or url.fragment or set(q)!={'sku'} or len(q['sku'])!=1:raise ValueError('El QR no es un enlace de producto PT válido.')
+  code=q['sku'][0]
+ code=code.upper()
+ if not re.fullmatch('[A-Z0-9]{14}',code):raise ValueError('El código debe contener el SKU de ventas de 14 caracteres. Escanea la etiqueta PT.')
+ return code
+
+def qr_value(sku,base=''):
+ if not base:return sku
+ url=urlsplit(base.strip())
+ if len(base)>180 or url.scheme not in ('http','https') or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('','/','/pt') or any(ord(c)<33 for c in base):raise ValueError('Indica la dirección HTTP o HTTPS de GMP accesible desde los celulares, sin usuario, contraseña ni parámetros.')
+ return url.scheme+'://'+url.netloc+'/pt?'+urlencode({'sku':sku})
 
 def signature(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,allow_nan=False).encode()).hexdigest()
 def quantity(value,unit):
@@ -46,8 +63,7 @@ CREATE TRIGGER IF NOT EXISTS pt_entries_no_delete BEFORE DELETE ON pt_entries BE
      result[sku]={'sku':sku,'descripcion':p['nombre'],'unidad':p.get('unidad') or 'PIEZA','tipo':p.get('tipo',''),'categoria':p.get('categoria','')}
   return {s:{**p,'revision':signature(p)} for s,p in result.items() if re.fullmatch('[A-Z0-9]{14}',s)}
  def product(self,code,actor):
-  self.scope(actor);code=text(code,100).strip().upper()
-  if not re.fullmatch('[A-Z0-9]{14}',code):raise ValueError('El código debe contener el SKU de ventas de 14 caracteres. Escanea la etiqueta PT.')
+  self.scope(actor);code=scan_sku(text(code,500))
   p=self.catalog().get(code)
   if not p:raise ValueError('El SKU no existe o está inactivo en el maestro de ventas.')
   return p
@@ -124,7 +140,7 @@ CREATE TRIGGER IF NOT EXISTS pt_entries_no_delete BEFORE DELETE ON pt_entries BE
    if index and index%10==0:c.showPage()
    x=20+(index%2)*(width/2);y=height-20-(index%10//2)*155
    c.setStrokeColorRGB(.85,.85,.85);c.rect(x,y-145,width/2-25,140)
-   qr=createBarcodeDrawing('QR',value=sku,width=77,height=77,barBorder=4);renderPDF.draw(qr,c,x+7,y-90)
+   qr=createBarcodeDrawing('QR',value=qr_value(sku,q.get('servidor','')),width=84,height=84,barBorder=4);renderPDF.draw(qr,c,x+3,y-92)
    p=products[sku];c.setFont('Helvetica-Bold',9);c.drawString(x+90,y-22,sku);c.setFont('Helvetica',8);name=p['descripcion'];words=name.split();line='';lines=[]
    for word in words:
     if stringWidth((line+' '+word).strip(),'Helvetica',8)>165:lines.append(line);line=word
