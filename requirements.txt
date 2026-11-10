@@ -1,2 +1,5 @@
 reportlab>=4.4,<5
 Pillow>=11,<13
+
+firebirdsql==1.5.1
+passlib>=1.7.4,<2

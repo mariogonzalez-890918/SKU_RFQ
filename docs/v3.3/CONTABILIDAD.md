@@ -1,0 +1,17 @@
+# Contabilidad Aspel SAE · GMP ERP 3.3.0
+
+Superadministrador entra a Contabilidad desde Inicio. Configura servidor Firebird, puerto, usuario, contraseña, codificación y ruta local del servidor o alias. Detectar ruta consulta los archivos abiertos del servicio Firebird y localiza SAE90EMPRE01.FDB. Una ruta UNC compartida no se abre como archivo: se conecta al motor de la computadora propietaria. No se copia ni modifica el FDB.
+
+Comprobar y guardar conexión inspecciona únicamente FACTF01, CLIE01 y FACTF_CLIB01 y verifica las claves únicas de las uniones. No crea tablas, usuarios ni permisos en Aspel. Las consultas usan transacciones READ COMMITTED READ ONLY, con rollback y cierre al finalizar. La contraseña se guarda cifrada con DPAPI; la misma cuenta Windows debe ejecutar GMP después de reiniciar. Si se migra de equipo/cuenta, guardar la contraseña nuevamente. No se distribuyen credenciales ni un destino predeterminado.
+
+El diseñador permite seleccionar hasta 60 campos, cambiar encabezados, ordenar columnas y elegir el campo de fecha de FACTF01. Las uniones son FACTF01.CVE_CLPV = CLIE01.CLAVE y FACTF01.CVE_DOC = FACTF_CLIB01.CLAVE_DOC. Son LEFT JOIN: una factura sin cliente o campos libres conserva su fila. No se permiten SQL libre, tablas adicionales ni fórmulas. Los campos libres de texto se limitan a 4096 caracteres por celda; los binarios no se muestran. Cambiar de conexión retira el reporte publicado hasta que Superadministrador lo guarde de nuevo.
+
+Crear usuarios con perfil CONTABILIDAD desde Usuarios. El perfil se limita al reporte, incluso si se intenta abrir otra URL o ampliar módulos por perfil. No ve conexión, contraseña, lista de campos disponibles ni diseñador. Puede consultar el reporte guardado y exportarlo a Excel. AUXTI y Gerencia no administran ni consultan este módulo por defecto ni mediante asignación del módulo: es exclusivo de Superadministrador y Contabilidad.
+
+Fecha inicial y final son obligatorias, dd/mm/aaaa, con calendario. El periodo incluye todo el día final. Hay filtros opcionales por cliente, documento y estado. El reporte muestra todos los estados si no se filtra: no se interpreta ni excluye automáticamente un estado de Aspel. La consulta pagina de 200 en 200; Excel incluye todas las coincidencias hasta 20,000 filas. Si se supera ese límite, solicita reducir el periodo y no descarga un reporte parcial. Se ejecutan hasta dos consultas simultáneas; una consulta adicional pide reintentar. No se suma por defecto ninguna columna ni se interpreta el saldo contable de una factura.
+
+El Excel contiene Reporte y Filtros; fechas dd/mm/aaaa, cifras numéricas y textos que nunca se ejecutan como fórmulas. La conexión y los reportes se guardan en data/sku.sqlite3 con historial de cambios y exportaciones. Respaldar la carpeta data completa: los respaldos por módulo anteriores no incorporan todavía esta configuración.
+
+Actualizar conservando data y config.json, reemplazar GMP_ERP.exe y reiniciar. El servidor GMP necesita alcanzar el puerto Firebird del equipo de Aspel. No se cambian firewall, servicios ni configuración de SAE automáticamente.
+
+Fuentes: [conexión remota Firebird](https://github.com/FirebirdSQL/firebird/blob/master/doc/README.connection_strings), [controlador Python utilizado](https://github.com/nakagami/pyfirebirdsql). La distribución incluye firebirdsql y su dependencia de autenticación; no necesita instalar un cliente Aspel ni fbclient.dll.

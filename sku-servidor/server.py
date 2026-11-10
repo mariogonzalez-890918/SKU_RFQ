@@ -19,11 +19,12 @@ from comercial_routes import CommercialAPI
 from pedidos_compra_routes import PurchaseAPI
 from inventarios_routes import InventoryAPI
 from pt_routes import PTAPI
+from contabilidad import Accounting,access as accounting_access
 APP_DIR=pathlib.Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else ROOT
 ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 MAX_BODY=25*1024*1024
 ADMIN_EMAIL='sistemas@grupomipan.com'
-ROLES={'pt':'PT · Producto terminado','superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventaspasteleria':'VENTASPASTELERIA','ventasins':'VentasIns','expendios':'Expendios'}
+ROLES={'contabilidad':'CONTABILIDAD','pt':'PT · Producto terminado','superadmin':'SUPERADMINISTRADOR','auxti':'AUXTI','visualizador':'VISUALIZADOR','ventas':'VENTAS','compras':'COMPRAS','alta':'ALTA DE PRODUCTOS','gerente':'GERENTE','almacenista':'ALMACENISTA','requisicion':'REQUISICIÓN','ventaspasteleria':'VENTASPASTELERIA','ventasins':'VentasIns','expendios':'Expendios'}
 def read_scope(actor,scope):
  require_module(actor,scope)
 def write_scope(actor,scope):
@@ -175,6 +176,7 @@ class Store:
   role=data.get('perfil');modules=data.get('modulos');revision=data.get('revision')
   if role not in ROLES or role=='superadmin':raise ValueError('El superadministrador conserva acceso completo.')
   if not isinstance(modules,list) or any(not isinstance(m,str) or m not in MODULES for m in modules) or len(set(modules))!=len(modules) or type(revision) is not int:raise ValueError('Configuración de módulos inválida.')
+  if role=='contabilidad' and any(m!='contabilidad' for m in modules):raise ValueError('Contabilidad solo puede consultar su reporte.')
   if role=='pt' and any(m!='pt' for m in modules):raise ValueError('El perfil PT solo tiene acceso al ingreso de producto terminado.')
   if role=='requisicion' and any(m!='requisiciones' for m in modules):raise ValueError('El perfil Requisición solo permite crear y consultar sus propias solicitudes.')
   with self.connect() as db:
@@ -230,6 +232,7 @@ def create_handler(store):
  procurement=PurchaseAPI(store,commercial.cm,requisitions,reports)
  inventory=InventoryAPI(store,procurement.po)
  pt=PTAPI(store)
+ accounting=Accounting(store)
  procurement.po.inventory=inventory.inv
  workflow=WorkflowStore(store,requisitions,reports)
  workflow.inventory=inventory.inv
@@ -254,10 +257,18 @@ def create_handler(store):
    if path=='/logo.png':return self.reply(200,(ROOT/'public/logo.png').read_bytes(),'image/png')
    actor=self.auth()
    if path in ('/','/index.html'):
-    name='index.html' if actor else 'login.html';return self.reply(200,(ROOT/'public'/name).read_bytes(),'text/html; charset=utf-8')
+    name=('accounting.html' if actor['role']=='contabilidad' else 'index.html') if actor else 'login.html';return self.reply(200,(ROOT/'public'/name).read_bytes(),'text/html; charset=utf-8')
    if path=='/pt' and not actor:return self.reply(200,(ROOT/'public/login.html').read_bytes(),'text/html; charset=utf-8')
    if not actor:return self.reply(401,{'error':'Inicia sesión para continuar.'})
    if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES,'app':{'titulo':TITLE,'version':VERSION,'soporte':SUPPORT_LINE}})
+   if actor['role']=='contabilidad' and path not in ('/contabilidad','/accounting.js','/accounting.css','/api/contabilidad/meta','/api/contabilidad/consultar','/api/contabilidad/excel'):return self.reply(403,{'error':'Contabilidad solo puede consultar su reporte.'})
+   if path in ('/contabilidad','/accounting.js','/accounting.css'):
+    try:
+     accounting_access(actor);name,kind={'/contabilidad':('accounting.html','text/html'),'/accounting.js':('accounting.js','text/javascript'),'/accounting.css':('accounting.css','text/css')}[path];return self.reply(200,(ROOT/'public'/name).read_bytes(),kind+'; charset=utf-8')
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
+   if path=='/api/contabilidad/meta':
+    try:return self.reply(200,accounting.status(actor))
+    except PermissionError as e:return self.reply(403,{'error':str(e)})
    if path in ('/comercial','/commercial.js','/commercial.css'):
     if not any(m in enabled_modules(actor) for m in ('ventasins','expendios')):return self.reply(403,{'error':'Módulo comercial no habilitado.'})
     file,kind={'/comercial':('commercial.html','text/html'),'/commercial.js':('commercial.js','text/javascript'),'/commercial.css':('commercial.css','text/css')}[path]
@@ -409,6 +420,15 @@ def create_handler(store):
     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),actor['csrf']):return self.reply(403,{'error':'Solicitud sin verificación de sesión.'})
     if self.path=='/api/logout' and self.command=='POST':
      store.logout(self.token);return self.reply(200,{'ok':True},cookie='gmp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+    if actor['role']=='contabilidad' and self.path not in ('/api/contabilidad/consultar','/api/contabilidad/excel'):raise PermissionError('Contabilidad solo puede consultar su reporte.')
+    if self.path.startswith('/api/contabilidad/') and self.command=='POST':
+     accounting_access(actor);data=self.read_body();action=self.path.removeprefix('/api/contabilidad/')
+     if action=='conexion':result=accounting.save_connection(data,actor)
+     elif action=='detectar':result=accounting.detect(data,actor)
+     elif action=='reporte':result=accounting.save_report(data,actor)
+     elif action in ('consultar','excel'):result=accounting.run(data,actor,action=='excel')
+     else:raise ValueError('Opción contable no encontrada.')
+     return self.reply(200,*result) if isinstance(result,tuple) else self.reply(200,result)
     if self.path.startswith('/api/pt/') and self.command=='POST':
      result=pt.mutate(self.path,self.read_body(),actor);return self.reply(200,result)
     if self.path.startswith('/api/inventarios/') and self.command=='POST':
@@ -476,6 +496,7 @@ def create_handler(store):
   def log_message(self,fmt,*args):print(self.address_string(),fmt%args,flush=True)
  Handler.commercial=commercial
  Handler.pt=pt
+ Handler.accounting=accounting
  Handler.inventory=inventory
  Handler.procurement=procurement
  return Handler

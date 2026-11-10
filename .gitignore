@@ -138,3 +138,10 @@
 !/docs/v3.2/*.md
 
 !/tools/test_windows_exe.py
+!/tests/test_accounting.py
+!/sku-servidor/public/accounting.html
+!/sku-servidor/public/accounting.js
+!/sku-servidor/public/accounting.css
+!/docs/v3.3/
+/docs/v3.3/*
+!/docs/v3.3/*.md
