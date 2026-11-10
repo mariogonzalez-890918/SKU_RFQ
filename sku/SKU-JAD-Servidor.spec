@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 project_root = Path(SPECPATH).resolve().parent
 server_root = project_root / 'sku-servidor'
 
@@ -9,7 +10,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[(str(server_root / 'public'), 'public')]+[(str(server_root / name), '.') for name in ('catalogos.json','initial.json','initial-ventas.json','initial-requisiciones.json')]+([(str(server_root / 'initial-admin.json'), '.')] if (server_root / 'initial-admin.json').exists() else []),
-    hiddenimports=[],
+    hiddenimports=collect_submodules('reportlab.graphics.barcode')+collect_submodules('firebirdsql')+collect_submodules('passlib.handlers'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

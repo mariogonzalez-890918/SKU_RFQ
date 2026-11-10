@@ -1,4 +1,4 @@
-# GMP ERP · Versión 3.1.8
+# GMP ERP · Versión 3.2.4
 
 Compras integrado con Requisiciones, Pedidos institucionales y Expendios. Incluye proveedores, solicitudes de cotización, pedidos de compra, recepciones parciales y registro interno de compras. Consulta [versión 3](docs/v3.0/IMPLEMENTACION.md).
 
@@ -7,6 +7,30 @@ Versión 2.1.1 con Pedidos institucionales y Expendios/TPV: pantallas y flujos s
 Aplicación para Windows y servidor local con generadores de SKU de compras y ventas, requisiciones de materiales, reportes de costos y autorizaciones. Interfaz con menú lateral, inicio con tarjetas y vistas adaptables a celular.
 
 aplicación soportada y gestionada por Ing. Mario González, sistemas@grupomipan.com 2026
+
+## Cambios 3.2.4
+
+Entradas PT por sucursal en REGISTRO ENTRADA: D producto, E cantidad, F UOM; una fila por captura y SKU identificado dentro de GMP. Permite conservar un libro mensual existente con respaldo original y controlar folios sin duplicarlos. El Superadministrador puede explorar OneDrive y seleccionar libros por sucursal y mes tras autorizar Microsoft; la conexión directa requiere registrar la aplicación una vez.
+
+## Cambios 3.2.3
+
+Publicación PT en carpeta local o compartida de una PC puente con OneDrive personal. No requiere Client ID. Incluye prueba de escritura en segundo plano, reintentos si la PC está apagada, guardado atómico y protección frente a archivos modificados fuera de GMP. El estado distingue guardado en carpeta de sincronización en la nube. Ver [configuración de PC puente](docs/v3.2/CARPETA_PUENTE.md).
+
+## Cambios 3.2.2
+
+Lectura local de fotos con corrección de orientación, ajuste de resolución, búsqueda por recortes, vista previa y avance. Separa fallos de lectura de errores del maestro y permite volver a elegir la misma imagen.
+
+## Cambios 3.2.1
+
+QR con enlace configurable a PT (local o ZeroTier), inicio de sesión conservando el producto y compatibilidad con códigos SKU anteriores. Estado explícito cuando OneDrive no está autorizado; los archivos mensuales son nuevos y no se enlazan automáticamente al libro de ejemplo.
+
+## Cambios 3.2.0
+
+Nuevo módulo **PT · Producto terminado** sobre el maestro de ventas. Genera etiquetas PDF con QR y Code 128 usando los SKU existentes; identifica productos por lector externo, cámara HTTPS o foto del código; PT captura únicamente cantidad y consulta sus propios ingresos en sucursales asignadas. Opera EJIDOS, SAN PABLO y CUAUTITLAN (EJE 8 queda excluido de PT).
+
+Cada ingreso tiene folio e identificador único, unidad y descripción del maestro, fecha de servidor y usuario. Las confirmaciones repetidas no duplican el ingreso. Gerencia, AUXTI y Superadministrador cancelan conservando el original; Excel contiene detalle y resumen neto por SKU/unidad. Este registro es de ingresos PT y no se mezcla con el Kárdex de materias primas ni representa stock neto después de ventas.
+
+Publicación de un Excel nuevo por sucursal/mes en OneDrive personal, actualizado en segundo plano después de capturar. Incluye configuración guiada para registrar aplicación Microsoft, conectar la cuenta propietaria y autorizar permisos delegados; **requiere completar esa conexión antes de publicar en la nube**. Tokens privados protegidos con DPAPI bajo la cuenta Windows del servidor. Conserva pendientes, reintenta y detecta cambios externos en el archivo. Los permisos de consulta se configuran en OneDrive: compartir la carpeta solo lectura. Consulta [guía PT](docs/v3.2/PT.md).
 
 ## Cambios 3.1.8
 
