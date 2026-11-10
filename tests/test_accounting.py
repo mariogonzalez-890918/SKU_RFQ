@@ -3,7 +3,7 @@ from unittest.mock import patch
 import test_backup_import as fixture
 import contabilidad as ac
 
-FIELDS={key:{'tabla':key.split('.')[0],'campo':key.split('.')[1],'tipo':kind,'subtipo':1 if kind==261 else 0} for key,kind in [('CFDI01.TIPO_DOC',37),('CFDI01.CVE_DOC',37),('CFDI01.UUID',37),('FACTF01.TIP_DOC',37),('FACTF01.CVE_DOC',37),('FACTF01.CVE_CLPV',37),('FACTF01.FECHA_DOC',35),('FACTF01.IMPORTE',27),('CLIE01.CLAVE',37),('CLIE01.NOMBRE',37),('FACTF_CLIB01.CLAVE_DOC',37),('FACTF_CLIB01.CAMPLIB1',261)]}
+FIELDS={key:{'tabla':key.split('.')[0],'campo':key.split('.')[1],'tipo':kind,'subtipo':1 if kind==261 else 0} for key,kind in [('CFDI01.TIPO_DOC',37),('CFDI01.CVE_DOC',37),('CFDI01.UUID',37),('FACTF01.TIP_DOC',37),('FACTF01.CVE_DOC',37),('FACTF01.CVE_CLPV',37),('FACTF01.FECHA_DOC',35),('FACTF01.IMPORTE',27),('FACTF01.FORMADEPAGOSAT',37),('CLIE01.CLAVE',37),('CLIE01.NOMBRE',37),('FACTF_CLIB01.CLAVE_DOC',37),('FACTF_CLIB01.CAMPLIB1',261)]}
 class Fake:
  def __init__(self,rows=None):self.rows=rows or [('F001',dt.datetime(2026,11,10,12,30),'CLIENTE DEMO',116.0)];self.queries=[]
  def cursor(self):return self
@@ -85,3 +85,16 @@ class AccountingTests(unittest.TestCase):
   class C:
    def cursor(self):return Cur()
   self.assertIn('CFDI01.UUID',ac.schema(C()))
+
+ def test_payment_form_filter_exact_readonly_options_and_excel_metadata(self):
+  meta=self.configure();reader=self.user('contabilidad');fake=Fake([('03',),('99',)])
+  @contextlib.contextmanager
+  def connected(c,p):yield fake
+  with patch('contabilidad.connect',connected):options=self.value('/api/contabilidad/formas-pago',actor=reader)
+  self.assertEqual(options['formas'],['03','99']);self.assertTrue(fake.queries[0][0].startswith('SELECT'))
+  fake=Fake()
+  with patch('contabilidad.connect',connected):
+   result=self.value('/api/contabilidad/consultar',{**self.params(meta),'formaPagoSat':"03' OR 1=1 --"},reader)
+   status,raw,_=self.call('/api/contabilidad/excel',{**self.params(meta),'formaPagoSat':'03'},reader)
+  sql,params=fake.queries[0];self.assertIn('TRIM(F.FORMADEPAGOSAT)=?',sql);self.assertNotIn("03' OR",sql);self.assertEqual(params[-1],"03' OR 1=1 --");self.assertEqual(result['filtros']['formaPagoSat'],"03' OR 1=1 --");self.assertEqual(status,200)
+  with zipfile.ZipFile(io.BytesIO(raw)) as z:self.assertIn('Forma de pago SAT',z.read('xl/worksheets/sheet2.xml').decode());self.assertIn('03',z.read('xl/worksheets/sheet2.xml').decode())

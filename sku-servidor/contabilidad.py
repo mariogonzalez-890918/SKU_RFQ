@@ -27,7 +27,7 @@ def filters(data):
  if end<start:raise ValueError('La fecha final debe ser igual o posterior a la inicial.')
  if (end-start).days>3660:raise ValueError('Consulta un periodo de hasta diez años.')
  result={'desde':start.strftime('%d/%m/%Y'),'hasta':end.strftime('%d/%m/%Y')}
- for key in ('cliente','documento','estado'):
+ for key in ('cliente','documento','estado','formaPagoSat'):
   value=data.get(key,'')
   if not isinstance(value,str) or len(value)>100:raise ValueError('Filtro inválido.')
   result[key]=value.strip()
@@ -102,6 +102,9 @@ def query_sql(report,fields,data,offset,limit):
  params=[start,after]
  for key,column in [('cliente','C.NOMBRE'),('documento','F.CVE_DOC'),('estado','F.STATUS')]:
   if f[key]:sql+=' AND '+column+' CONTAINING ?';params.append(f[key])
+ if f['formaPagoSat']:
+  if 'FACTF01.FORMADEPAGOSAT' not in fields:raise ValueError('Actualiza la conexión para reconocer FORMADEPAGOSAT de FACTF01.')
+  sql+=' AND TRIM(F.FORMADEPAGOSAT)=?';params.append(f['formaPagoSat'])
  sql+=' ORDER BY F.FECHA_DOC,F.CVE_DOC';return sql,params,f
 
 def value(v,field):
@@ -174,6 +177,16 @@ class Accounting:
    if db.execute('SELECT revision FROM accounting_report').fetchone()[0]!=data.get('revision') or db.execute('SELECT revision FROM accounting_config').fetchone()[0]!=data.get('revisionConexion'):raise Conflict('La configuración cambió. Actualiza antes de guardar.')
    db.execute('UPDATE accounting_report SET revision=revision+1,payload=?',(json.dumps(report),));db.execute('INSERT INTO accounting_audit VALUES(?,?,?,?)',(now(),actor['email'],'REPORTE',json.dumps(report)))
   return self.status(actor)
+ def payment_forms(self,actor):
+  access(actor);r,c,s,fields,rr,report=self.read()
+  if not report or not c or not s or 'FACTF01.FORMADEPAGOSAT' not in fields:return {'formas':[]}
+  if not self.lock.acquire(blocking=False):raise ValueError('Hay dos consultas contables en proceso. Escribe la clave de forma de pago o inténtalo nuevamente.')
+  try:
+   with connect(c,self.secret(s)) as conn:
+    cur=conn.cursor();cur.execute("SELECT FIRST 1001 DISTINCT TRIM(FORMADEPAGOSAT) FROM FACTF01 WHERE FORMADEPAGOSAT IS NOT NULL AND TRIM(FORMADEPAGOSAT)<>'' ORDER BY 1");rows=cur.fetchmany(1001)
+  finally:self.lock.release()
+  if len(rows)>1000:raise ValueError('Hay demasiadas formas de pago distintas; escribe la clave exacta.')
+  return {'formas':[str(row[0]).strip() for row in rows]}
  def run(self,data,actor,export=False):
   access(actor);r,c,s,fields,rr,report=self.read()
   if not report or not c or not s:raise ValueError('Superadministrador todavía no ha publicado el reporte.')
@@ -212,7 +225,7 @@ def workbook(result):
  header=[c['titulo'] for c in result['columnas']];rows=[header]+result['filas'];ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
  xml='<worksheet xmlns="'+ns+'"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews><cols>'+''.join('<col min="'+str(i+1)+'" max="'+str(i+1)+'" width="25" customWidth="1"/>' for i in range(len(header)))+'</cols><sheetData>'
  xml+=''.join('<row r="'+str(i+1)+'">'+''.join(cell(v,col(j+1)+str(i+1),i>0 and result['columnas'][j]['numerico']) for j,v in enumerate(row))+'</row>' for i,row in enumerate(rows))+'</sheetData><autoFilter ref="A1:'+col(len(header))+str(len(rows))+'"/></worksheet>'
- meta=[['Reporte',result['nombre']],['Fecha inicial',result['filtros']['desde']],['Fecha final',result['filtros']['hasta']],['Cliente contiene',result['filtros']['cliente']],['Documento contiene',result['filtros']['documento']],['Estado contiene',result['filtros']['estado']],['Filas',len(result['filas'])],['Fuente','Aspel SAE · Solo lectura']]
+ meta=[['Reporte',result['nombre']],['Fecha inicial',result['filtros']['desde']],['Fecha final',result['filtros']['hasta']],['Cliente contiene',result['filtros']['cliente']],['Documento contiene',result['filtros']['documento']],['Estado contiene',result['filtros']['estado']],['Forma de pago SAT',result['filtros'].get('formaPagoSat','')],['Filas',len(result['filas'])],['Fuente','Aspel SAE · Solo lectura']]
  meta_xml='<worksheet xmlns="'+ns+'"><sheetData>'+''.join('<row r="'+str(i+1)+'">'+''.join(cell(v,col(j+1)+str(i+1)) for j,v in enumerate(row))+'</row>' for i,row in enumerate(meta))+'</sheetData></worksheet>'
  output=io.BytesIO()
  with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:

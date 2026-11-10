@@ -19,3 +19,5 @@ Fuentes: [conexión remota Firebird](https://github.com/FirebirdSQL/firebird/blo
 ## Corrección de perfiles y módulos · 3.3.1
 
 Los encabezados de Accesos por perfil y sus casillas se generan desde la misma lista de módulos de la API. El selector de alta/edición de usuarios usa los perfiles del servidor: incluye Contabilidad y Ventaspastelería. La tabla muestra el total de perfiles y módulos, permite filtrar un perfil y conserva la primera columna al desplazar horizontalmente. No se reescriben permisos guardados al abrir la pantalla. Guardar afecta únicamente la fila seleccionada, usando claves de módulo, no posiciones visuales. Contabilidad solo permite su reporte; se deshabilitan las casillas ajenas a sus funciones y se conserva la comprobación de permisos en el servidor.
+
+Forma de pago SAT filtra exactamente FACTF01.FORMADEPAGOSAT. El campo permite elegir entre las claves existentes en Aspel o escribir una clave; vacío incluye todas. Se conserva el filtro al paginar y exportar, y figura en la hoja Filtros del Excel. Las sugerencias usan una consulta de lectura sin datos de clientes; no se inventan nombres ni equivalencias fiscales.

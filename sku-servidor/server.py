@@ -261,14 +261,15 @@ def create_handler(store):
    if path=='/pt' and not actor:return self.reply(200,(ROOT/'public/login.html').read_bytes(),'text/html; charset=utf-8')
    if not actor:return self.reply(401,{'error':'Inicia sesión para continuar.'})
    if path=='/api/me':return self.reply(200,{'user':actor,'roles':ROLES,'app':{'titulo':TITLE,'version':VERSION,'soporte':SUPPORT_LINE}})
-   if actor['role']=='contabilidad' and path not in ('/contabilidad','/accounting.js','/accounting.css','/api/contabilidad/meta','/api/contabilidad/consultar','/api/contabilidad/excel'):return self.reply(403,{'error':'Contabilidad solo puede consultar su reporte.'})
+   if actor['role']=='contabilidad' and path not in ('/contabilidad','/accounting.js','/accounting.css','/api/contabilidad/meta','/api/contabilidad/formas-pago','/api/contabilidad/consultar','/api/contabilidad/excel'):return self.reply(403,{'error':'Contabilidad solo puede consultar su reporte.'})
    if path in ('/contabilidad','/accounting.js','/accounting.css'):
     try:
      accounting_access(actor);name,kind={'/contabilidad':('accounting.html','text/html'),'/accounting.js':('accounting.js','text/javascript'),'/accounting.css':('accounting.css','text/css')}[path];return self.reply(200,(ROOT/'public'/name).read_bytes(),kind+'; charset=utf-8')
     except PermissionError as e:return self.reply(403,{'error':str(e)})
-   if path=='/api/contabilidad/meta':
-    try:return self.reply(200,accounting.status(actor))
+   if path in ('/api/contabilidad/meta','/api/contabilidad/formas-pago'):
+    try:return self.reply(200,accounting.payment_forms(actor) if path.endswith('/formas-pago') else accounting.status(actor))
     except PermissionError as e:return self.reply(403,{'error':str(e)})
+    except ValueError as e:return self.reply(400,{'error':str(e)})
    if path in ('/comercial','/commercial.js','/commercial.css'):
     if not any(m in enabled_modules(actor) for m in ('ventasins','expendios')):return self.reply(403,{'error':'Módulo comercial no habilitado.'})
     file,kind={'/comercial':('commercial.html','text/html'),'/commercial.js':('commercial.js','text/javascript'),'/commercial.css':('commercial.css','text/css')}[path]
