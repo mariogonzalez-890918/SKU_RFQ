@@ -29,6 +29,7 @@ jobs:
         run: |
           node tests/mobile_menu_regression.mjs
           node tests/commercial_browser_regression.mjs
+          node tests/profile_modules_regression.mjs
       - name: Compilar distribución pública
         run: python tools/build_public.py --output-dir dist-public
       - name: Probar EXE distribuido y códigos PT
@@ -40,6 +41,6 @@ jobs:
         run: |
           $tag = "windows-${{ github.run_number }}-${{ github.run_attempt }}"
           $releaseOptions = @()
-          if ("3.3.0" -match "rc|beta|alpha") { $releaseOptions += "--prerelease" }
-          gh release create $tag dist-public/GMP_ERP.exe dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe GMP_ERP_Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "GMP ERP v3.3.0 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
+          if ("3.3.1" -match "rc|beta|alpha") { $releaseOptions += "--prerelease" }
+          gh release create $tag dist-public/GMP_ERP.exe dist-public/RFQ_SKU_GMP.exe dist-public/SKU-JAD-Servidor.exe GMP_ERP_Windows.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "GMP ERP v3.3.1 - Windows $tag" @releaseOptions --notes "EXE para Windows sin Python externo. Catálogos vacíos y contraseña definida en el primer inicio. Para actualizar, conserva data y config.json."
 

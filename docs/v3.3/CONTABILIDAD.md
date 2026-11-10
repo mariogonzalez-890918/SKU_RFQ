@@ -15,3 +15,7 @@ El Excel contiene Reporte y Filtros; fechas dd/mm/aaaa, cifras numéricas y text
 Actualizar conservando data y config.json, reemplazar GMP_ERP.exe y reiniciar. El servidor GMP necesita alcanzar el puerto Firebird del equipo de Aspel. No se cambian firewall, servicios ni configuración de SAE automáticamente.
 
 Fuentes: [conexión remota Firebird](https://github.com/FirebirdSQL/firebird/blob/master/doc/README.connection_strings), [controlador Python utilizado](https://github.com/nakagami/pyfirebirdsql). La distribución incluye firebirdsql y su dependencia de autenticación; no necesita instalar un cliente Aspel ni fbclient.dll.
+
+## Corrección de perfiles y módulos · 3.3.1
+
+Los encabezados de Accesos por perfil y sus casillas se generan desde la misma lista de módulos de la API. El selector de alta/edición de usuarios usa los perfiles del servidor: incluye Contabilidad y Ventaspastelería. La tabla muestra el total de perfiles y módulos, permite filtrar un perfil y conserva la primera columna al desplazar horizontalmente. No se reescriben permisos guardados al abrir la pantalla. Guardar afecta únicamente la fila seleccionada, usando claves de módulo, no posiciones visuales. Contabilidad solo permite su reporte; se deshabilitan las casillas ajenas a sus funciones y se conserva la comprobación de permisos en el servidor.

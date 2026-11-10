@@ -139,6 +139,7 @@
 
 !/tools/test_windows_exe.py
 !/tests/test_accounting.py
+!/tests/profile_modules_regression.mjs
 !/sku-servidor/public/accounting.html
 !/sku-servidor/public/accounting.js
 !/sku-servidor/public/accounting.css
