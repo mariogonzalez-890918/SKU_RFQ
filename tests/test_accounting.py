@@ -3,7 +3,7 @@ from unittest.mock import patch
 import test_backup_import as fixture
 import contabilidad as ac
 
-FIELDS={key:{'tabla':key.split('.')[0],'campo':key.split('.')[1],'tipo':kind,'subtipo':1 if kind==261 else 0} for key,kind in [('FACTF01.CVE_DOC',37),('FACTF01.CVE_CLPV',37),('FACTF01.FECHA_DOC',35),('FACTF01.IMPORTE',27),('CLIE01.CLAVE',37),('CLIE01.NOMBRE',37),('FACTF_CLIB01.CLAVE_DOC',37),('FACTF_CLIB01.CAMPLIB1',261)]}
+FIELDS={key:{'tabla':key.split('.')[0],'campo':key.split('.')[1],'tipo':kind,'subtipo':1 if kind==261 else 0} for key,kind in [('CFDI01.TIPO_DOC',37),('CFDI01.CVE_DOC',37),('CFDI01.UUID',37),('FACTF01.TIP_DOC',37),('FACTF01.CVE_DOC',37),('FACTF01.CVE_CLPV',37),('FACTF01.FECHA_DOC',35),('FACTF01.IMPORTE',27),('CLIE01.CLAVE',37),('CLIE01.NOMBRE',37),('FACTF_CLIB01.CLAVE_DOC',37),('FACTF_CLIB01.CAMPLIB1',261)]}
 class Fake:
  def __init__(self,rows=None):self.rows=rows or [('F001',dt.datetime(2026,11,10,12,30),'CLIENTE DEMO',116.0)];self.queries=[]
  def cursor(self):return self
@@ -35,7 +35,7 @@ class AccountingTests(unittest.TestCase):
   def connected(c,p):self.assertEqual(p,'only-test-secret');yield fake
   data={**self.params(meta),'cliente':"O'BRIEN; DROP TABLE CLIE01 --",'columnas':[{'campo':'CLIE01.SALDO'}]}
   with patch('contabilidad.connect',connected):result=self.value('/api/contabilidad/consultar',data,reader)
-  sql,params=fake.queries[-1];self.assertTrue(sql.startswith('SELECT FIRST 201 SKIP 0'));self.assertNotIn(data['cliente'],sql);self.assertNotIn('SALDO',sql);self.assertIn(data['cliente'],params);self.assertEqual(params[:2],[dt.date(2026,11,1),dt.date(2026,12,1)]);self.assertEqual(result['filas'][0][1],'10/11/2026 12:30:00')
+  sql,params=fake.queries[-1];self.assertTrue(sql.startswith('SELECT FIRST 201 SKIP 0'));self.assertNotIn(data['cliente'],sql);self.assertNotIn('SALDO',sql);self.assertIn('F.TIP_DOC=D.TIPO_DOC AND F.CVE_DOC=D.CVE_DOC',sql);self.assertIn(data['cliente'],params);self.assertEqual(params[:2],[dt.date(2026,11,1),dt.date(2026,12,1)]);self.assertEqual(result['filas'][0][1],'10/11/2026 12:30:00')
   status=self.value('/api/contabilidad/meta',actor=reader);self.assertNotIn('secret',json.dumps(status));self.assertNotIn('host',json.dumps(status))
   with self.store.connect() as db:secret=db.execute('SELECT secret FROM accounting_config').fetchone()[0]
   self.assertNotIn('only-test-secret',secret);self.assertTrue(secret)
@@ -74,3 +74,14 @@ class AccountingTests(unittest.TestCase):
   class C:
    def cursor(self):return Cur()
   with self.assertRaisesRegex(ValueError,'clave única'):ac.schema(C())
+
+ def test_cfdi_fields_use_document_type_and_document_unique_key(self):
+  meta=self.configure();report={**meta['reporte'],'columnas':[{'campo':'CFDI01.UUID','titulo':'UUID CFDI'}]};self.value('/api/contabilidad/reporte',{**report,'revision':meta['revisionReporte'],'revisionConexion':meta['revision']})
+  class Cur:
+   def execute(self,*args):pass
+   def fetchall(self):
+    self.n=getattr(self,'n',0)+1
+    return [(f['tabla'],f['campo'],f['tipo'],f['subtipo']) for f in FIELDS.values()] if self.n==1 else [('CLIE01','K1','CLAVE'),('FACTF_CLIB01','K2','CLAVE_DOC'),('CFDI01','K3','CVE_DOC'),('CFDI01','K3','TIPO_DOC')]
+  class C:
+   def cursor(self):return Cur()
+  self.assertIn('CFDI01.UUID',ac.schema(C()))

@@ -5,7 +5,7 @@ from permissions import require_module
 from requisiciones import Conflict,now
 from pt_onedrive import crypt
 
-TABLES={'FACTF01':'F','CLIE01':'C','FACTF_CLIB01':'L'}
+TABLES={'FACTF01':'F','CLIE01':'C','FACTF_CLIB01':'L','CFDI01':'D'}
 MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 NUMERIC={7,8,10,16,27};DATES={12,35}
 DEFAULT_COLUMNS=[('FACTF01.CVE_DOC','Documento'),('FACTF01.FECHA_DOC','Fecha'),('CLIE01.NOMBRE','Cliente'),('FACTF01.IMPORTE','Importe')]
@@ -59,17 +59,17 @@ def connect(config,password):
    finally:conn.close()
 
 def schema(conn):
- cur=conn.cursor();cur.execute("SELECT TRIM(rf.RDB$RELATION_NAME),TRIM(rf.RDB$FIELD_NAME),f.RDB$FIELD_TYPE,f.RDB$FIELD_SUB_TYPE FROM RDB$RELATION_FIELDS rf JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE=f.RDB$FIELD_NAME WHERE rf.RDB$RELATION_NAME IN ('FACTF01','CLIE01','FACTF_CLIB01') ORDER BY rf.RDB$RELATION_NAME,rf.RDB$FIELD_POSITION")
+ cur=conn.cursor();cur.execute("SELECT TRIM(rf.RDB$RELATION_NAME),TRIM(rf.RDB$FIELD_NAME),f.RDB$FIELD_TYPE,f.RDB$FIELD_SUB_TYPE FROM RDB$RELATION_FIELDS rf JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE=f.RDB$FIELD_NAME WHERE rf.RDB$RELATION_NAME IN ('FACTF01','CLIE01','FACTF_CLIB01','CFDI01') ORDER BY rf.RDB$RELATION_NAME,rf.RDB$FIELD_POSITION")
  fields={}
  for table,name,kind,subtype in cur.fetchall():
   if table in TABLES and re.fullmatch(r'[A-Z][A-Z0-9_$]*',name):fields[table+'.'+name]={'tabla':table,'campo':name,'tipo':kind,'subtipo':subtype}
- required=('FACTF01.CVE_DOC','FACTF01.CVE_CLPV','FACTF01.FECHA_DOC','CLIE01.CLAVE','FACTF_CLIB01.CLAVE_DOC')
+ required=('CFDI01.TIPO_DOC','CFDI01.CVE_DOC','FACTF01.TIP_DOC','FACTF01.CVE_DOC','FACTF01.CVE_CLPV','FACTF01.FECHA_DOC','CLIE01.CLAVE','FACTF_CLIB01.CLAVE_DOC')
  if any(k not in fields for k in required):raise ValueError('Faltan tablas o campos necesarios de SAE Empresa01.')
- cur.execute("SELECT TRIM(i.RDB$RELATION_NAME),TRIM(i.RDB$INDEX_NAME),TRIM(s.RDB$FIELD_NAME) FROM RDB$INDICES i JOIN RDB$INDEX_SEGMENTS s ON i.RDB$INDEX_NAME=s.RDB$INDEX_NAME WHERE i.RDB$RELATION_NAME IN ('CLIE01','FACTF_CLIB01') AND i.RDB$UNIQUE_FLAG=1 AND (i.RDB$INDEX_INACTIVE IS NULL OR i.RDB$INDEX_INACTIVE=0)")
+ cur.execute("SELECT TRIM(i.RDB$RELATION_NAME),TRIM(i.RDB$INDEX_NAME),TRIM(s.RDB$FIELD_NAME) FROM RDB$INDICES i JOIN RDB$INDEX_SEGMENTS s ON i.RDB$INDEX_NAME=s.RDB$INDEX_NAME WHERE i.RDB$RELATION_NAME IN ('CLIE01','FACTF_CLIB01','CFDI01') AND i.RDB$UNIQUE_FLAG=1 AND (i.RDB$INDEX_INACTIVE IS NULL OR i.RDB$INDEX_INACTIVE=0)")
  indexes={}
  for table,index,field in cur.fetchall():indexes.setdefault((table,index),[]).append(field)
- for table,key in [('CLIE01','CLAVE'),('FACTF_CLIB01','CLAVE_DOC')]:
-  if not any(t==table and cols==[key] for (t,i),cols in indexes.items()):raise ValueError('No se confirmó una clave única en '+table+'. No se ejecutan uniones que puedan duplicar documentos.')
+ for table,keys in [('CLIE01',{'CLAVE'}),('FACTF_CLIB01',{'CLAVE_DOC'}),('CFDI01',{'TIPO_DOC','CVE_DOC'})]:
+  if not any(t==table and set(cols)==keys and len(cols)==len(keys) for (t,i),cols in indexes.items()):raise ValueError('No se confirmó una clave única en '+table+'. No se ejecutan uniones que puedan duplicar documentos.')
  return fields
 
 def definition(data,fields):
@@ -96,7 +96,7 @@ def query_sql(report,fields,data,offset,limit):
  if type(offset) is not int or not 0<=offset<=1000000 or type(limit) is not int or not 1<=limit<=20001:raise ValueError('Página inválida.')
  columns=report['columnas'];selected=','.join(expression(c['campo'],fields) for c in columns)
  # All identifiers come from the saved, validated schema; all filter values are parameters.
- sql='SELECT FIRST '+str(limit)+' SKIP '+str(offset)+' '+selected+' FROM FACTF01 F LEFT JOIN CLIE01 C ON F.CVE_CLPV=C.CLAVE LEFT JOIN FACTF_CLIB01 L ON F.CVE_DOC=L.CLAVE_DOC WHERE '+expression(report['campoFecha'],fields)+' >= ? AND '+expression(report['campoFecha'],fields)+' < ?'
+ sql='SELECT FIRST '+str(limit)+' SKIP '+str(offset)+' '+selected+' FROM FACTF01 F LEFT JOIN CLIE01 C ON F.CVE_CLPV=C.CLAVE LEFT JOIN FACTF_CLIB01 L ON F.CVE_DOC=L.CLAVE_DOC LEFT JOIN CFDI01 D ON F.TIP_DOC=D.TIPO_DOC AND F.CVE_DOC=D.CVE_DOC WHERE '+expression(report['campoFecha'],fields)+' >= ? AND '+expression(report['campoFecha'],fields)+' < ?'
  try:after=end+dt.timedelta(days=1)
  except OverflowError:raise ValueError('La fecha final está fuera del rango permitido.')
  params=[start,after]
